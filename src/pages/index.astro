@@ -1,5 +1,13 @@
 ---
 import "../styles/global.css";
+
+const errorParam = Astro.url.searchParams.get("error");
+const errorMessage =
+  errorParam === "notfound"
+    ? "That room doesn't exist (anymore)."
+    : errorParam === "unauthorized"
+      ? "This device isn't recognised as that room's presenter -- start a new crit from here."
+      : undefined;
 ---
 
 <!doctype html>
@@ -13,6 +21,12 @@ import "../styles/global.css";
     <main class="home">
       <h1>Crit Stage</h1>
       <p class="tagline">Live, written feedback for crits -- one rung of the ladder at a time.</p>
+
+      {errorMessage && (
+        <p class="banner-error" role="alert">
+          {errorMessage}
+        </p>
+      )}
 
       <section class="card">
         <h2>Presenting?</h2>
@@ -146,6 +160,14 @@ import "../styles/global.css";
       .error {
         color: var(--danger);
         margin-bottom: 0;
+      }
+
+      .banner-error {
+        background: color-mix(in srgb, var(--danger) 15%, var(--surface));
+        border: 1px solid var(--danger);
+        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        margin: 1.5rem 0 0;
       }
     </style>
   </body>

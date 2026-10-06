@@ -1,0 +1,240 @@
+---
+import "../../styles/global.css";
+import { getRoomByCode, listCards, presenterCookieName } from "../../lib/rooms.ts";
+import { STEPS } from "../../lib/steps.ts";
+
+const { code } = Astro.params;
+const room = code ? await getRoomByCode(code) : undefined;
+
+if (!room) {
+  return Astro.redirect("/?error=notfound");
+}
+
+const presented = Astro.cookies.get(presenterCookieName(room.code))?.value;
+if (!presented || presented !== room.presenterToken) {
+  return Astro.redirect("/?error=unauthorized");
+}
+
+const allCards = await listCards(room.id);
+const cardsByStep = new Map<number, typeof allCards>();
+for (const s of STEPS) cardsByStep.set(s.step, []);
+for (const card of allCards) cardsByStep.get(card.step)?.push(card);
+
+// Rendered top (4, Suggestions) to bottom (1, Clarify) -- climbing the ladder.
+const rungs = [...STEPS].reverse();
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-width=1" />
+    <title>Stage · {room.code}</title>
+  </head>
+  <body>
+    <header class="top-bar">
+      <span class="room-label">Room</span>
+      <span class="room-code">{room.code}</span>
+    </header>
+
+    <main class="ladder" data-current-step={room.currentStep}>
+      {
+        rungs.map(({ step, label }) => {
+          const stepCards = cardsByStep.get(step) ?? [];
+          return (
+            <section class="rung" data-step={step} aria-labelledby={`rung-${step}-label`}>
+              <div class="rung-head">
+                <button type="button" class="rung-toggle" data-step={step} aria-pressed={step === room.currentStep}>
+                  <span class="lock" aria-hidden="true">
+                    🔒
+                  </span>
+                  <span id={`rung-${step}-label`} class="rung-label">
+                    {step}. {label}
+                  </span>
+                  <span class="rung-state"></span>
+                </button>
+              </div>
+              <ul class="cards" aria-live={step === room.currentStep ? "polite" : "off"}>
+                {stepCards.map((card) => (
+                  <li class="card-chip">{card.body}</li>
+                ))}
+                {stepCards.length === 0 && <li class="empty">No cards yet</li>}
+              </ul>
+            </section>
+          );
+        })
+      }
+    </main>
+
+    <script define:vars={{ code: room.code, initialStep: room.currentStep }}>
+      const ladder = document.querySelector(".ladder");
+
+      function applyCurrentStep(step) {
+        ladder.dataset.currentStep = String(step);
+        for (const button of document.querySelectorAll(".rung-toggle")) {
+          const isOpen = Number(button.dataset.step) === step;
+          button.setAttribute("aria-pressed", String(isOpen));
+          button.closest(".rung").classList.toggle("is-open", isOpen);
+          button.closest(".rung").classList.toggle("is-locked", !isOpen);
+        }
+      }
+
+      applyCurrentStep(initialStep);
+
+      for (const button of document.querySelectorAll(".rung-toggle")) {
+        button.addEventListener("click", async () => {
+          const step = Number(button.dataset.step);
+          if (step === Number(ladder.dataset.currentStep)) return;
+          try {
+            const res = await fetch(`/api/rooms/${code}/step`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ step }),
+            });
+            if (!res.ok) throw new Error("step change failed");
+            const { currentStep } = await res.json();
+            applyCurrentStep(currentStep);
+          } catch {
+            // Left as-is; the rung the server still thinks is open stays visibly open.
+          }
+        });
+      }
+    </script>
+
+    <style>
+      :root {
+        --rung-height: clamp(4.5rem, 9vh, 7rem);
+      }
+
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .top-bar {
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        padding: clamp(0.75rem, 2vh, 1.5rem) clamp(1rem, 3vw, 3rem);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .room-label {
+        color: var(--text-dim);
+        font-size: clamp(1rem, 1.6vw, 1.5rem);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .room-code {
+        font-size: clamp(1.75rem, 4vw, 3.5rem);
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .ladder {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: clamp(0.75rem, 1.5vh, 1.25rem);
+        padding: clamp(1rem, 3vh, 2.5rem) clamp(1rem, 4vw, 4rem);
+        max-width: 72rem;
+        margin: 0 auto;
+        width: 100%;
+      }
+
+      .rung {
+        border-radius: 1rem;
+        border: 2px solid var(--border);
+        background: var(--surface);
+        padding: clamp(0.75rem, 1.5vh, 1.25rem) clamp(1rem, 2vw, 1.75rem);
+        transition: none;
+      }
+
+      .rung.is-open {
+        border-color: var(--accent);
+        background: var(--surface-raised);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+      }
+
+      .rung.is-locked {
+        opacity: 0.55;
+      }
+
+      .rung-toggle {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        background: none;
+        border: none;
+        padding: 0;
+        min-height: var(--rung-height);
+        text-align: left;
+      }
+
+      .rung-label {
+        font-size: clamp(1.25rem, 2.6vw, 2.25rem);
+        font-weight: 700;
+      }
+
+      .lock {
+        font-size: clamp(1.1rem, 2vw, 1.75rem);
+      }
+
+      .rung.is-open .lock {
+        visibility: hidden;
+      }
+
+      .rung-state {
+        margin-left: auto;
+        font-size: clamp(0.9rem, 1.4vw, 1.25rem);
+        color: var(--text-dim);
+      }
+
+      .rung.is-open .rung-state::after {
+        content: "open -- accepting cards";
+        color: var(--accent);
+      }
+
+      .rung.is-locked .rung-state::after {
+        content: "locked";
+      }
+
+      .cards {
+        list-style: none;
+        margin: 0.75rem 0 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .card-chip {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        font-size: clamp(0.95rem, 1.3vw, 1.2rem);
+        max-width: 28rem;
+      }
+
+      .empty {
+        color: var(--text-dim);
+        font-size: clamp(0.9rem, 1.2vw, 1.1rem);
+        font-style: italic;
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .rung {
+          transition:
+            border-color 0.2s ease,
+            opacity 0.2s ease;
+        }
+      }
+    </style>
+  </body>
+</html>
