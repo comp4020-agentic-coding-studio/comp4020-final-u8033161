@@ -23,7 +23,7 @@ if (!room) {
       !room ? (
         <main class="not-found">
           <h1>Room not found</h1>
-          <p>Double-check the code on the presenter's screen.</p>
+          <p role="alert">No room found with that code.</p>
           <p>
             <a href="/">Back home</a>
           </p>
@@ -44,11 +44,18 @@ if (!room) {
                   </span>
                 </div>
                 {step === room.currentStep ? (
-                  <form class="card-form" data-step={step}>
+                  <form class="card-form" data-step={step} novalidate>
                     <label for={`body-${step}`}>Your feedback for {label}</label>
-                    <textarea id={`body-${step}`} name="body" rows="3" required maxlength="2000" />
+                    <textarea
+                      id={`body-${step}`}
+                      name="body"
+                      rows="3"
+                      required
+                      maxlength="2000"
+                      aria-describedby={`status-${step}`}
+                    />
                     <button type="submit">Send</button>
-                    <p class="status" role="status" />
+                    <p id={`status-${step}`} class="status" role="status" />
                   </form>
                 ) : null}
               </li>
@@ -62,18 +69,30 @@ if (!room) {
       const code = window.location.pathname.split("/").pop()!;
       const roomEl = document.querySelector<HTMLElement>(".room");
 
+      function setStatus(status: HTMLElement, text: string, isError: boolean) {
+        status.textContent = text;
+        status.setAttribute("role", isError ? "alert" : "status");
+      }
+
       function wireForm(form: HTMLFormElement) {
         const step = Number(form.dataset.step);
         const textarea = form.querySelector("textarea")!;
-        const status = form.querySelector(".status")!;
+        const status = form.querySelector(".status") as HTMLElement;
         const button = form.querySelector("button")!;
+
+        textarea.addEventListener("input", () => {
+          setStatus(status, "", false);
+        });
 
         form.addEventListener("submit", async (event) => {
           event.preventDefault();
           const body = textarea.value.trim();
-          if (!body) return;
+          if (!body) {
+            setStatus(status, "Please write something before sending.", true);
+            return;
+          }
           button.disabled = true;
-          status.textContent = "";
+          setStatus(status, "", false);
           try {
             const res = await fetch(`/api/rooms/${code}/cards`, {
               method: "POST",
@@ -81,15 +100,15 @@ if (!room) {
               body: JSON.stringify({ step, body }),
             });
             if (res.status === 409) {
-              status.textContent = "This rung just closed -- hang tight for the next one.";
+              setStatus(status, "This rung is closed. Please write for the open rung.", true);
             } else if (!res.ok) {
-              status.textContent = "Couldn't send that. Try again?";
+              setStatus(status, "Couldn't send. Please try again.", true);
             } else {
               textarea.value = "";
-              status.textContent = "Sent.";
+              setStatus(status, "Sent.", false);
             }
           } catch {
-            status.textContent = "Couldn't send that. Try again?";
+            setStatus(status, "Couldn't send. Please try again.", true);
           } finally {
             button.disabled = false;
           }
@@ -110,11 +129,12 @@ if (!room) {
         const form = document.createElement("form");
         form.className = "card-form";
         form.dataset.step = String(step);
+        form.setAttribute("novalidate", "");
         form.innerHTML = `
           <label for="body-${step}">Your feedback</label>
-          <textarea id="body-${step}" name="body" rows="3" required maxlength="2000"></textarea>
+          <textarea id="body-${step}" name="body" rows="3" required maxlength="2000" aria-describedby="status-${step}"></textarea>
           <button type="submit">Send</button>
-          <p class="status" role="status"></p>
+          <p id="status-${step}" class="status" role="status"></p>
         `;
         rung.append(form);
         wireForm(form);
@@ -240,6 +260,10 @@ if (!room) {
         min-height: 1.2rem;
         color: var(--text-dim);
         margin: 0.4rem 0 0;
+      }
+
+      .status[role="alert"] {
+        color: var(--danger);
       }
     </style>
   </body>

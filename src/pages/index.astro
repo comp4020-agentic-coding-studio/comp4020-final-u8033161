@@ -40,7 +40,7 @@ const errorMessage =
       <section class="card">
         <h2>Joining a crit?</h2>
         <p>Enter the room code from the presenter's screen.</p>
-        <form id="join-form">
+        <form id="join-form" novalidate>
           <label for="code">Room code</label>
           <input
             id="code"
@@ -51,6 +51,7 @@ const errorMessage =
             autocomplete="off"
             placeholder="123456"
             required
+            aria-describedby="join-error"
           />
           <button type="submit">Join</button>
         </form>
@@ -80,12 +81,18 @@ const errorMessage =
 
       const joinForm = document.querySelector<HTMLFormElement>("#join-form")!;
       const joinError = document.querySelector<HTMLParagraphElement>("#join-error")!;
+      const codeInput = document.querySelector<HTMLInputElement>("#code")!;
+
+      codeInput.addEventListener("input", () => {
+        joinError.hidden = true;
+      });
+
       joinForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        const code = document.querySelector<HTMLInputElement>("#code")!.value.trim();
+        const code = codeInput.value.trim();
         if (!/^\d{6}$/.test(code)) {
           joinError.hidden = false;
-          joinError.textContent = "Enter the 6-digit code from the presenter's screen.";
+          joinError.textContent = "Enter the 6-digit room code.";
           return;
         }
         window.location.href = `/room/${code}`;
