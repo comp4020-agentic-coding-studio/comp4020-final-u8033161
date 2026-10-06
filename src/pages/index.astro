@@ -1,15 +1,152 @@
 ---
-// Placeholder for the scaffolding commit -- the real home page (create/join)
-// lands in the next commit.
+import "../styles/global.css";
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-width=1" />
     <title>Crit Stage</title>
   </head>
   <body>
-    <p>Scaffold in progress.</p>
+    <main class="home">
+      <h1>Crit Stage</h1>
+      <p class="tagline">Live, written feedback for crits -- one rung of the ladder at a time.</p>
+
+      <section class="card">
+        <h2>Presenting?</h2>
+        <p>Start a room and put this screen up on the projector.</p>
+        <form id="create-form">
+          <button type="submit">Start a crit</button>
+        </form>
+        <p id="create-error" class="error" role="alert" hidden></p>
+      </section>
+
+      <section class="card">
+        <h2>Joining a crit?</h2>
+        <p>Enter the room code from the presenter's screen.</p>
+        <form id="join-form">
+          <label for="code">Room code</label>
+          <input
+            id="code"
+            name="code"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            autocomplete="off"
+            placeholder="123456"
+            required
+          />
+          <button type="submit">Join</button>
+        </form>
+        <p id="join-error" class="error" role="alert" hidden></p>
+      </section>
+    </main>
+
+    <script>
+      const createForm = document.querySelector<HTMLFormElement>("#create-form")!;
+      const createError = document.querySelector<HTMLParagraphElement>("#create-error")!;
+      createForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        createError.hidden = true;
+        const submitButton = createForm.querySelector("button")!;
+        submitButton.disabled = true;
+        try {
+          const res = await fetch("/api/rooms", { method: "POST" });
+          if (!res.ok) throw new Error("request failed");
+          const { code } = (await res.json()) as { code: string };
+          window.location.href = `/stage/${code}`;
+        } catch {
+          createError.hidden = false;
+          createError.textContent = "Couldn't start a room. Try again.";
+          submitButton.disabled = false;
+        }
+      });
+
+      const joinForm = document.querySelector<HTMLFormElement>("#join-form")!;
+      const joinError = document.querySelector<HTMLParagraphElement>("#join-error")!;
+      joinForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const code = document.querySelector<HTMLInputElement>("#code")!.value.trim();
+        if (!/^\d{6}$/.test(code)) {
+          joinError.hidden = false;
+          joinError.textContent = "Enter the 6-digit code from the presenter's screen.";
+          return;
+        }
+        window.location.href = `/room/${code}`;
+      });
+    </script>
+
+    <style>
+      .home {
+        max-width: 32rem;
+        margin: 0 auto;
+        padding: 3rem 1.25rem;
+      }
+
+      h1 {
+        margin-bottom: 0.25rem;
+      }
+
+      .tagline {
+        color: var(--text-dim);
+        margin-top: 0;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        margin-top: 1.5rem;
+      }
+
+      .card h2 {
+        margin-top: 0;
+      }
+
+      form {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+
+      label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        margin-bottom: 0.3rem;
+      }
+
+      input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 0.6rem 0.75rem;
+        width: 10rem;
+        letter-spacing: 0.1em;
+      }
+
+      button {
+        background: var(--accent);
+        color: var(--accent-contrast);
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.65rem 1.1rem;
+        font-weight: 600;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      .error {
+        color: var(--danger);
+        margin-bottom: 0;
+      }
+    </style>
   </body>
 </html>
