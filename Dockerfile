@@ -1,18 +1,39 @@
 # syntax = docker/dockerfile:1
 
-# A placeholder, and yours to replace: it serves one page, plus README.md
-# verbatim at /readme/, which is enough to prove the deploy path end to end.
-# Whatever your app is built with, the image that replaces this one must serve
-# HTTP on 0.0.0.0:$PORT (fly.toml sets PORT) and publish README.md at /readme/
-# (spec/README.md says what's checked).
+# Replaces the busybox placeholder. Serves the Astro (@astrojs/node,
+# standalone) app on 0.0.0.0:$PORT (fly.toml sets PORT). /readme/ is served
+# by the app itself (src/pages/readme/index.astro), not by this file.
 
-FROM docker.io/library/busybox:1.38.0
-COPY placeholder/ /src/
-COPY README.md /src/
-# README.md goes into the page as-is, HTML-escaped, in place of @README@;
-# rendering it properly is your app's job
-RUN mkdir -p /site/readme \
-    && cp /src/index.html /site/ \
-    && sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' /src/README.md > /src/body \
-    && sed -e '/@README@/{r /src/body' -e 'd}' /src/readme.html > /site/readme/index.html
-CMD ["sh", "-c", "exec httpd -f -p 0.0.0.0:${PORT:-8080} -h /site"]
+FROM node:24-slim AS builder
+WORKDIR /app
+
+# better-sqlite3 ships prebuilt binaries for common targets, but this makes
+# sure it can compile from source if none matches this image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build
+RUN pnpm prune --prod
+
+FROM node:24-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=8080
+ENV DB_PATH=/data/app.db
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/drizzle ./drizzle
+COPY --from=builder /app/scripts ./scripts
+COPY README.md ./README.md
+
+EXPOSE 8080
+CMD ["node", "scripts/migrate-and-start.mjs"]
