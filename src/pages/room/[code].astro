@@ -59,9 +59,10 @@ if (!room) {
     }
 
     <script>
-      const form = document.querySelector<HTMLFormElement>(".card-form");
-      if (form) {
-        const code = window.location.pathname.split("/").pop()!;
+      const code = window.location.pathname.split("/").pop()!;
+      const roomEl = document.querySelector<HTMLElement>(".room");
+
+      function wireForm(form: HTMLFormElement) {
         const step = Number(form.dataset.step);
         const textarea = form.querySelector("textarea")!;
         const status = form.querySelector(".status")!;
@@ -93,6 +94,51 @@ if (!room) {
             button.disabled = false;
           }
         });
+      }
+
+      document
+        .querySelectorAll<HTMLFormElement>(".card-form")
+        .forEach(wireForm);
+
+      function closeForm(step: number) {
+        document.querySelector(`.rung[data-step="${step}"] .card-form`)?.remove();
+      }
+
+      function openForm(step: number) {
+        const rung = document.querySelector(`.rung[data-step="${step}"]`);
+        if (!rung || rung.querySelector(".card-form")) return;
+        const form = document.createElement("form");
+        form.className = "card-form";
+        form.dataset.step = String(step);
+        form.innerHTML = `
+          <label for="body-${step}">Your feedback</label>
+          <textarea id="body-${step}" name="body" rows="3" required maxlength="2000"></textarea>
+          <button type="submit">Send</button>
+          <p class="status" role="status"></p>
+        `;
+        rung.append(form);
+        wireForm(form);
+      }
+
+      // Polling for now -- Crit 9 replaces this with SSE. A few seconds is
+      // plenty: the point this week is the open-step rule, not latency.
+      if (roomEl) {
+        let currentStep = Number(roomEl.dataset.currentStep);
+        setInterval(async () => {
+          try {
+            const res = await fetch(`/api/rooms/${code}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.currentStep !== currentStep) {
+              closeForm(currentStep);
+              openForm(data.currentStep);
+              currentStep = data.currentStep;
+              roomEl.dataset.currentStep = String(currentStep);
+            }
+          } catch {
+            // offline for a tick; the next poll tries again
+          }
+        }, 3000);
       }
     </script>
 

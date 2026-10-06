@@ -99,6 +99,48 @@ const rungs = [...STEPS].reverse();
           }
         });
       }
+
+      function renderCards(step, cards) {
+        const list = document.querySelector(`.rung[data-step="${step}"] .cards`);
+        if (!list) return;
+        list.textContent = "";
+        if (cards.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "empty";
+          empty.textContent = "No cards yet";
+          list.append(empty);
+          return;
+        }
+        for (const card of cards) {
+          const item = document.createElement("li");
+          item.className = "card-chip";
+          item.textContent = card.body;
+          list.append(item);
+        }
+      }
+
+      // Polling for now (a few seconds is plenty for this week's scope) --
+      // Crit 9 replaces this with SSE so cards and rung changes push instead.
+      async function poll() {
+        try {
+          const res = await fetch(`/api/rooms/${code}`);
+          if (!res.ok) return;
+          const data = await res.json();
+          applyCurrentStep(data.currentStep);
+          const byStep = new Map();
+          for (const card of data.cards) {
+            if (!byStep.has(card.step)) byStep.set(card.step, []);
+            byStep.get(card.step).push(card);
+          }
+          for (let step = 1; step <= 4; step++) {
+            renderCards(step, byStep.get(step) ?? []);
+          }
+        } catch {
+          // offline for a tick; the next poll tries again
+        }
+      }
+
+      setInterval(poll, 3000);
     </script>
 
     <style>
