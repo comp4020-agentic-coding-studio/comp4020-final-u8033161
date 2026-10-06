@@ -13,17 +13,15 @@ can't also be taking notes.
 ## What it draws on
 
 - **Ladder of Feedback** (Clarify → Strengths → Concerns → Suggestions), the
-  structure this course's crits already use. I believe this traces to David
-  Perkins and Harvard Project Zero's work on visible feedback/critique
-  protocols (e.g. *Making Learning Visible*) -- **source to verify**, I'm not
-  fully certain of the exact original citation.
+  structure this course's crits already use, from Harvard Project Zero. The
+  original second rung is called "Value"; this app uses "Strengths" instead,
+  following this course's own website wording.
 - **Liz Lerman's Critical Response Process**, specifically its principle
   that opinions are shared only with the maker's consent, after they've had
-  a chance to ask their own questions first. From Liz Lerman and John
-  Borstel, *Liz Lerman's Critical Response Process: A Method for Getting
-  Useful Feedback on Anything You Make, From Dance to Dessert* (2003) --
-  reasonably confident on this one, but worth checking the exact edition/
-  publisher details yourself.
+  a chance to ask their own questions first. Lerman, L., & Borstel, J.
+  (2003). *Liz Lerman's Critical Response Process: A method for getting
+  useful feedback on anything you make, from dance to dessert*. Dance
+  Exchange.
 - **Kahoot's room-code join flow** -- everyone in this course has already
   typed a PIN into a phone to join a Kahoot session, so it's a join pattern
   that needs no explanation.
