@@ -1,0 +1,200 @@
+---
+import "../../styles/global.css";
+import { getRoomByCode } from "../../lib/rooms.ts";
+import { STEPS } from "../../lib/steps.ts";
+
+const { code } = Astro.params;
+const room = code ? await getRoomByCode(code) : undefined;
+
+if (!room) {
+  Astro.response.status = 404;
+}
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-width=1" />
+    <title>{room ? `Room ${room.code}` : "Room not found"}</title>
+  </head>
+  <body>
+    {
+      !room ? (
+        <main class="not-found">
+          <h1>Room not found</h1>
+          <p>Double-check the code on the presenter's screen.</p>
+          <p>
+            <a href="/">Back home</a>
+          </p>
+        </main>
+      ) : (
+        <main class="room" data-current-step={room.currentStep}>
+          <p class="room-code">Room {room.code}</p>
+
+          <ol class="ladder">
+            {STEPS.map(({ step, label }) => (
+              <li class="rung" data-step={step}>
+                <div class="rung-head">
+                  <span class="lock" aria-hidden="true">
+                    🔒
+                  </span>
+                  <span class="rung-label">
+                    {step}. {label}
+                  </span>
+                </div>
+                {step === room.currentStep ? (
+                  <form class="card-form" data-step={step}>
+                    <label for={`body-${step}`}>Your feedback for {label}</label>
+                    <textarea id={`body-${step}`} name="body" rows="3" required maxlength="2000" />
+                    <button type="submit">Send</button>
+                    <p class="status" role="status" />
+                  </form>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </main>
+      )
+    }
+
+    <script>
+      const form = document.querySelector<HTMLFormElement>(".card-form");
+      if (form) {
+        const code = window.location.pathname.split("/").pop()!;
+        const step = Number(form.dataset.step);
+        const textarea = form.querySelector("textarea")!;
+        const status = form.querySelector(".status")!;
+        const button = form.querySelector("button")!;
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const body = textarea.value.trim();
+          if (!body) return;
+          button.disabled = true;
+          status.textContent = "";
+          try {
+            const res = await fetch(`/api/rooms/${code}/cards`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ step, body }),
+            });
+            if (res.status === 409) {
+              status.textContent = "This rung just closed -- hang tight for the next one.";
+            } else if (!res.ok) {
+              status.textContent = "Couldn't send that. Try again?";
+            } else {
+              textarea.value = "";
+              status.textContent = "Sent.";
+            }
+          } catch {
+            status.textContent = "Couldn't send that. Try again?";
+          } finally {
+            button.disabled = false;
+          }
+        });
+      }
+    </script>
+
+    <style>
+      body {
+        padding: 1.25rem;
+      }
+
+      .not-found {
+        max-width: 24rem;
+        margin: 4rem auto;
+        text-align: center;
+      }
+
+      .room {
+        max-width: 28rem;
+        margin: 0 auto;
+      }
+
+      .room-code {
+        color: var(--text-dim);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.08em;
+      }
+
+      .ladder {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .rung {
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        padding: 1rem;
+        background: var(--surface);
+      }
+
+      .rung:has(.card-form) {
+        border-color: var(--accent);
+        background: var(--surface-raised);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+      }
+
+      .rung:not(:has(.card-form)) {
+        opacity: 0.6;
+      }
+
+      .rung-head {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .rung:has(.card-form) .lock {
+        visibility: hidden;
+      }
+
+      .rung-label {
+        font-weight: 700;
+        font-size: 1.1rem;
+      }
+
+      .card-form {
+        margin-top: 0.75rem;
+      }
+
+      .card-form label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        margin-bottom: 0.3rem;
+      }
+
+      textarea {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 0.6rem;
+        resize: vertical;
+      }
+
+      .card-form button {
+        margin-top: 0.5rem;
+        background: var(--accent);
+        color: var(--accent-contrast);
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.6rem 1rem;
+        font-weight: 600;
+        width: 100%;
+      }
+
+      .status {
+        min-height: 1.2rem;
+        color: var(--text-dim);
+        margin: 0.4rem 0 0;
+      }
+    </style>
+  </body>
+</html>
