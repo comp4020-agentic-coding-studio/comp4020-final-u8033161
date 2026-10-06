@@ -64,6 +64,17 @@ open rung accepts cards, enforced server-side), not transport. Crit 9 swaps
 polling for SSE, at which point presence (the blinking dots) and arrival
 animation become straightforward to add on the same stream.
 
+## Manual end-to-end test on the live deployment
+
+Ran the real flow against `https://comp4020-final-u8033161.fly.dev`, not
+just `pnpm check`: created a room, opened the stage on one device and
+joined with the code on another. All four rungs unlocked in sequence from
+the stage; each one accepted a card from the participant device and it
+appeared on the big-screen stage within a few seconds (polling); a page
+refresh on both devices kept everything as it was. Confirms the open-rung
+rule and the Fly-volume persistence hold up outside of the spec suite, not
+just inside it.
+
 ## What this slice deliberately leaves out
 
 No realtime push, no participant presence, no sealed-envelope/consent flow
