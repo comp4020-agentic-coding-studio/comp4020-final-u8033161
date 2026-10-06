@@ -1,0 +1,48 @@
+---
+// Publishes README.md in full at /readme/ (spec/README.md: the deploy and
+// the crit marker both read it there). Read from disk at request time, not
+// imported at build time, so it always matches the committed file.
+import { marked } from "marked";
+import { readFileSync } from "node:fs";
+
+import "../../styles/global.css";
+
+const source = readFileSync("README.md", "utf8");
+const html = marked.parse(source, { async: false });
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-width=1" />
+    <title>README</title>
+  </head>
+  <body>
+    <main class="readme" set:html={html} />
+    <style>
+      .readme {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 2rem 1.25rem 4rem;
+      }
+
+      .readme :global(img) {
+        max-width: 100%;
+      }
+
+      .readme :global(pre) {
+        overflow-x: auto;
+        background: var(--surface);
+        padding: 1rem;
+        border-radius: 0.5rem;
+      }
+
+      .readme :global(code) {
+        background: var(--surface);
+        padding: 0.1em 0.3em;
+        border-radius: 0.3em;
+      }
+    </style>
+  </body>
+</html>
