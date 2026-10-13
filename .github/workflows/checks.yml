@@ -32,14 +32,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build and start the app
         # the same image Fly deploys, with a throwaway /data in place of the
-        # volume; the spec runs against it
+        # volume; the spec runs against it. STEP_COUNTDOWN_MS is a test-only
+        # override (unset in fly.toml, so production keeps the real 10s) --
+        # without it, the countdown spec would need to wait out 10 real
+        # seconds per assertion.
         run: |
           docker build -t app .
-          docker run -d --init --name app -p 8080:8080 -e PORT=8080 --tmpfs /data app
+          docker run -d --init --name app -p 8080:8080 -e PORT=8080 -e STEP_COUNTDOWN_MS=1200 --tmpfs /data app
       - name: Run the spec
         run: pnpm check
         env:
           APP_URL: http://localhost:8080
+          # Matches the container's override above, so the countdown spec
+          # knows how long to actually wait.
+          STEP_COUNTDOWN_MS: 1200
       - name: Show the app's output
         # what the container printed, so a crash or slow boot is visible
         if: ${{ failure() }}
