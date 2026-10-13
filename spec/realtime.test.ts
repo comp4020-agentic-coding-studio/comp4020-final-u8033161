@@ -117,7 +117,7 @@ it(
     // server's own definition until closesAt passes.
     const schedule = await post(`/api/rooms/${code}/step`, { step: 2 }, presenterCookie);
     expect(schedule.status).toBe(202);
-    const { closesAt } = (await schedule.json()) as { closesAt: number };
+    const { remainingMs } = (await schedule.json()) as { remainingMs: number };
 
     const duringCountdown = await post(`/api/rooms/${code}/cards`, {
       step: 1,
@@ -125,8 +125,7 @@ it(
     });
     expect(duringCountdown.status).toBe(201);
 
-    const waitMs = closesAt - Date.now() + 250; // a small margin past the server's own deadline
-    await new Promise((resolve) => setTimeout(resolve, Math.max(waitMs, 0)));
+    await new Promise((resolve) => setTimeout(resolve, remainingMs + 250)); // a small margin past the server's own deadline
 
     const afterCountdown = await post(`/api/rooms/${code}/cards`, {
       step: 1,
