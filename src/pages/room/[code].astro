@@ -31,7 +31,10 @@ if (!room) {
       ) : (
         <main class="room" data-current-step={room.currentStep}>
           <p class="room-code">Room {room.code}</p>
-          <p id="countdown-banner" class="countdown-banner" role="status" hidden></p>
+          <p id="countdown-banner" class="countdown-banner" hidden>
+            <span id="countdown-visual"></span>
+            <span id="countdown-announce" class="visually-hidden" role="status" />
+          </p>
 
           <ol class="ladder">
             {STEPS.map(({ step, label }) => (
@@ -44,6 +47,7 @@ if (!room) {
                     {step}. {label}
                   </span>
                 </div>
+                <div class="draft-slot" />
                 {step === room.currentStep ? (
                   <form class="card-form" data-step={step} novalidate>
                     <label for={`body-${step}`}>Your feedback for {label}</label>
@@ -62,6 +66,47 @@ if (!room) {
               </li>
             ))}
           </ol>
+
+          {/*
+            Astro only scopes an element's CSS (the data-astro-cid-* attribute
+            that makes the <style> below actually apply) to markup present in
+            this file at build time -- an element built at runtime via
+            innerHTML never gets it, which is why the form the old version
+            built with a template string rendered unstyled. Elements inside a
+            <template>, though, get the attribute baked in right here, so
+            cloning this one for a newly-opened rung carries the scoping with
+            it. One template serves every rung: the step number and label are
+            filled in after cloning.
+          */}
+          <template id="card-form-template">
+            <form class="card-form" novalidate>
+              <label>Your feedback</label>
+              <textarea rows="3" required maxlength="2000" />
+              <button type="submit">Send</button>
+              <p class="status" role="status" />
+            </form>
+          </template>
+
+          {/* Same reasoning: the draft-recovery box is built at runtime
+             (it only appears once a rung has actually closed with an
+             unsent draft in it), so it also needs to come from a
+             same-file template rather than an innerHTML string. */}
+          <template id="draft-template">
+            <div class="draft-box">
+              <p class="draft-title" />
+              <p class="draft-text" />
+              <div class="draft-actions">
+                {/* Text is filled in by JS (showDraftRecovery) once it
+                   knows which rung the draft is being offered into. */}
+                <button type="button" class="draft-copy">
+                  Copy into next rung
+                </button>
+                <button type="button" class="draft-dismiss">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </template>
         </main>
       )
     }
@@ -70,7 +115,45 @@ if (!room) {
       const code = window.location.pathname.split("/").pop()!;
       const roomEl = document.querySelector<HTMLElement>(".room");
       const banner = document.getElementById("countdown-banner")!;
+      const countdownVisual = document.getElementById("countdown-visual")!;
+      const countdownAnnounce = document.getElementById("countdown-announce")!;
+      const formTemplate = document.getElementById("card-form-template") as HTMLTemplateElement | null;
+      const draftTemplate = document.getElementById("draft-template") as HTMLTemplateElement | null;
       const stepLabels: Record<number, string> = { 1: "Clarify", 2: "Strengths", 3: "Concerns", 4: "Suggestions" };
+
+      // sessionStorage access can throw (private browsing, blocked site
+      // data) and a cleared or missing value is normal, not an error -- both
+      // are expected outcomes here, not failures, so every access is
+      // wrapped rather than left to crash the rest of the page.
+      function draftStorageKey(step: number): string {
+        return `crit-draft:${code}:${step}`;
+      }
+
+      function saveDraft(step: number, text: string): void {
+        try {
+          if (text) sessionStorage.setItem(draftStorageKey(step), text);
+          else sessionStorage.removeItem(draftStorageKey(step));
+        } catch {
+          // best-effort only; an unsaved draft still survives for as long
+          // as this tab stays open, which is the common case
+        }
+      }
+
+      function loadDraft(step: number): string | null {
+        try {
+          return sessionStorage.getItem(draftStorageKey(step));
+        } catch {
+          return null;
+        }
+      }
+
+      function clearDraft(step: number): void {
+        try {
+          sessionStorage.removeItem(draftStorageKey(step));
+        } catch {
+          // nothing to clean up if storage isn't available in the first place
+        }
+      }
 
       let countdownInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -80,22 +163,23 @@ if (!room) {
           countdownInterval = null;
         }
         banner.hidden = true;
-        banner.textContent = "";
+        countdownVisual.textContent = "";
+        countdownAnnounce.textContent = "";
       }
 
-      // Driven by the server's closesAt, not a local 10-second timer, so a
-      // reconnect mid-countdown (dropped phone signal, tab backgrounded and
-      // resumed) shows the real time left rather than restarting its own
-      // clock. The form itself is untouched here -- it's still the open
-      // rung's form until the `step` event actually arrives, so writing and
-      // sending keep working right up to the last second.
-      function startCountdown(pending: { closingStep: number; closesAt: number }) {
+      // Same remainingMs + local-clock approach as the stage: anchored to
+      // this device's own clock at the moment the event arrives, not the
+      // server's absolute deadline, so clock drift can't shift the
+      // displayed count.
+      function startCountdown(pending: { closingStep: number; remainingMs: number }) {
+        const alreadyRunning = countdownInterval !== null;
         const label = stepLabels[pending.closingStep] ?? pending.closingStep;
+        const deadline = Date.now() + pending.remainingMs;
 
         function tick() {
-          const secondsLeft = Math.max(0, Math.ceil((pending.closesAt - Date.now()) / 1000));
+          const secondsLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
           banner.hidden = false;
-          banner.textContent = `${label} closes in ${secondsLeft}s`;
+          countdownVisual.textContent = `${label} closes in ${secondsLeft}s`;
           if (secondsLeft <= 0 && countdownInterval) {
             clearInterval(countdownInterval);
             countdownInterval = null;
@@ -105,6 +189,10 @@ if (!room) {
         if (countdownInterval) clearInterval(countdownInterval);
         tick();
         countdownInterval = setInterval(tick, 250);
+        // Announced once per countdown, not on every 250ms tick -- see the
+        // stage page for the same split between a ticking display and a
+        // single aria-live sentence.
+        if (!alreadyRunning) countdownAnnounce.textContent = `${label} is closing.`;
       }
 
       function setStatus(status: HTMLElement, text: string, isError: boolean) {
@@ -118,8 +206,12 @@ if (!room) {
         const status = form.querySelector(".status") as HTMLElement;
         const button = form.querySelector("button")!;
 
+        const draft = loadDraft(step);
+        if (draft) textarea.value = draft;
+
         textarea.addEventListener("input", () => {
           setStatus(status, "", false);
+          saveDraft(step, textarea.value);
         });
 
         form.addEventListener("submit", async (event) => {
@@ -139,9 +231,10 @@ if (!room) {
             });
             if (res.status === 409) {
               // The countdown ran out between this tab rendering the form
-              // and the submit landing -- the one case this project exists
-              // to prevent losing someone's words over. The textarea is
-              // deliberately left alone: nothing here clears it.
+              // and the submit landing. The textarea is deliberately left
+              // alone: nothing here clears it, and the rung-switch handler
+              // below is what turns this leftover text into the draft box
+              // on whichever rung opens next.
               setStatus(
                 status,
                 "This rung just closed. Your draft is still here — you can copy it into the next rung.",
@@ -151,6 +244,7 @@ if (!room) {
               setStatus(status, "Couldn't send. Please try again.", true);
             } else {
               textarea.value = "";
+              clearDraft(step);
               setStatus(status, "Sent.", false);
             }
           } catch {
@@ -161,29 +255,81 @@ if (!room) {
         });
       }
 
-      document
-        .querySelectorAll<HTMLFormElement>(".card-form")
-        .forEach(wireForm);
+      document.querySelectorAll<HTMLFormElement>(".card-form").forEach(wireForm);
 
-      function closeForm(step: number) {
-        document.querySelector(`.rung[data-step="${step}"] .card-form`)?.remove();
+      function closeForm(step: number): string {
+        // Returns whatever was left unsent in the textarea, so the caller
+        // can decide what to do with it -- this function's only job is to
+        // remove the form and hand back its contents.
+        const form = document.querySelector<HTMLFormElement>(`.rung[data-step="${step}"] .card-form`);
+        const leftover = form?.querySelector("textarea")?.value.trim() ?? "";
+        form?.remove();
+        return leftover;
       }
 
       function openForm(step: number) {
         const rung = document.querySelector(`.rung[data-step="${step}"]`);
-        if (!rung || rung.querySelector(".card-form")) return;
-        const form = document.createElement("form");
-        form.className = "card-form";
+        if (!rung || rung.querySelector(".card-form") || !formTemplate) return;
+        const form = formTemplate.content.firstElementChild!.cloneNode(true) as HTMLFormElement;
         form.dataset.step = String(step);
-        form.setAttribute("novalidate", "");
-        form.innerHTML = `
-          <label for="body-${step}">Your feedback</label>
-          <textarea id="body-${step}" name="body" rows="3" required maxlength="2000" aria-describedby="status-${step}"></textarea>
-          <button type="submit">Send</button>
-          <p id="status-${step}" class="status" role="status"></p>
-        `;
+        const label = stepLabels[step] ?? String(step);
+        form.querySelector("label")!.textContent = `Your feedback for ${label}`;
+        const textarea = form.querySelector("textarea")!;
+        textarea.id = `body-${step}`;
+        form.querySelector("label")!.setAttribute("for", `body-${step}`);
+        const status = form.querySelector(".status") as HTMLElement;
+        status.id = `status-${step}`;
+        textarea.setAttribute("aria-describedby", status.id);
         rung.append(form);
         wireForm(form);
+      }
+
+      // ADR 2's promise is that nobody's words disappear, not just that a
+      // rejected *submit* keeps its draft (the 409 case above) -- an unsent
+      // draft that was never submitted at all, sitting in a rung that
+      // closes out from under it, is the same loss. When a rung switch
+      // commits, any leftover text in the closing rung's textarea becomes a
+      // read-only draft box on top of whichever form opens next, with a
+      // button to copy it in (never auto-sent -- it was written for the old
+      // rung, so only a person should decide whether and how it applies to
+      // the new one) and a button to dismiss it.
+      function showDraftRecovery(closingStep: number, text: string) {
+        const nextStep = Number(roomEl!.dataset.currentStep);
+        const slot = document.querySelector(`.rung[data-step="${nextStep}"] .draft-slot`);
+        if (!slot || !draftTemplate) return;
+        slot.innerHTML = "";
+        const box = draftTemplate.content.firstElementChild!.cloneNode(true) as HTMLElement;
+        const closingLabel = stepLabels[closingStep] ?? String(closingStep);
+        const nextLabel = stepLabels[nextStep] ?? String(nextStep);
+        box.querySelector(".draft-title")!.textContent = `Your unsent ${closingLabel} draft`;
+        box.querySelector(".draft-text")!.textContent = text;
+        const copyButton = box.querySelector(".draft-copy") as HTMLButtonElement;
+        copyButton.textContent = `Copy into ${nextLabel}`;
+        copyButton.addEventListener("click", () => {
+          const textarea = document.querySelector<HTMLTextAreaElement>(`.rung[data-step="${nextStep}"] textarea`);
+          if (textarea) {
+            textarea.value = text;
+            textarea.dispatchEvent(new Event("input", { bubbles: true }));
+            textarea.focus();
+          }
+          clearDraft(closingStep);
+          slot.innerHTML = "";
+        });
+        box.querySelector(".draft-dismiss")!.addEventListener("click", () => {
+          clearDraft(closingStep);
+          slot.innerHTML = "";
+        });
+        slot.append(box);
+      }
+
+      function handleStepChange(nextStep: number, closingStep: number) {
+        clearCountdown();
+        if (nextStep === closingStep) return;
+        const leftover = closeForm(closingStep);
+        openForm(nextStep);
+        if (roomEl) roomEl.dataset.currentStep = String(nextStep);
+        if (leftover) showDraftRecovery(closingStep, leftover);
+        clearDraft(closingStep);
       }
 
       // SSE instead of polling. Reconnects (EventSource's own, after a
@@ -191,16 +337,13 @@ if (!room) {
       // currently-open rung is always rebuilt from the server's actual
       // state rather than whatever this tab last knew.
       if (roomEl) {
-        let currentStep = Number(roomEl.dataset.currentStep);
         const source = new EventSource(`/api/rooms/${code}/events`);
 
         source.addEventListener("snapshot", (event) => {
           const data = JSON.parse((event as MessageEvent).data);
+          const currentStep = Number(roomEl.dataset.currentStep);
           if (data.currentStep !== currentStep) {
-            closeForm(currentStep);
-            openForm(data.currentStep);
-            currentStep = data.currentStep;
-            roomEl.dataset.currentStep = String(currentStep);
+            handleStepChange(data.currentStep, currentStep);
           }
           if (data.pending) startCountdown(data.pending);
           else clearCountdown();
@@ -212,13 +355,8 @@ if (!room) {
 
         source.addEventListener("step", (event) => {
           const data = JSON.parse((event as MessageEvent).data);
-          clearCountdown();
-          if (data.currentStep !== currentStep) {
-            closeForm(currentStep);
-            openForm(data.currentStep);
-            currentStep = data.currentStep;
-            roomEl.dataset.currentStep = String(currentStep);
-          }
+          const currentStep = Number(roomEl.dataset.currentStep);
+          handleStepChange(data.currentStep, currentStep);
         });
       }
     </script>
@@ -307,9 +445,10 @@ if (!room) {
         margin-bottom: 0.3rem;
       }
 
-      textarea {
+      .card-form textarea {
         width: 100%;
         background: var(--bg);
+        color: var(--text);
         border: 1px solid var(--border);
         border-radius: 0.5rem;
         padding: 0.6rem;
@@ -335,6 +474,50 @@ if (!room) {
 
       .status[role="alert"] {
         color: var(--danger);
+      }
+
+      .draft-slot:empty {
+        display: none;
+      }
+
+      .draft-box {
+        margin-top: 0.75rem;
+        padding: 0.75rem;
+        border: 1px dashed var(--accent);
+        border-radius: 0.5rem;
+        background: var(--bg);
+      }
+
+      .draft-title {
+        margin: 0 0 0.4rem;
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: var(--text-dim);
+      }
+
+      .draft-text {
+        margin: 0 0 0.6rem;
+        white-space: pre-wrap;
+      }
+
+      .draft-actions {
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      .draft-actions button {
+        flex: 1;
+        border-radius: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .draft-copy {
+        border-color: var(--accent) !important;
+        color: var(--accent) !important;
       }
     </style>
   </body>
