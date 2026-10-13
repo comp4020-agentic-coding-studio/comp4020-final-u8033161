@@ -39,6 +39,8 @@ const rungs = STEPS;
       <span class="room-code">{room.code}</span>
     </header>
 
+    <p id="countdown-banner" class="countdown-banner" role="status" hidden></p>
+
     <main class="ladder" data-current-step={room.currentStep}>
       {
         rungs.map(({ step, label }) => {
@@ -70,6 +72,49 @@ const rungs = STEPS;
 
     <script define:vars={{ code: room.code, initialStep: room.currentStep }}>
       const ladder = document.querySelector(".ladder");
+      const banner = document.getElementById("countdown-banner");
+      const stepLabels = { 1: "Clarify", 2: "Strengths", 3: "Concerns", 4: "Suggestions" };
+
+      let countdownInterval = null;
+
+      function setButtonsDisabled(disabled) {
+        for (const button of document.querySelectorAll(".rung-toggle")) {
+          button.disabled = disabled;
+        }
+      }
+
+      function clearCountdown() {
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+        }
+        banner.hidden = true;
+        banner.textContent = "";
+        setButtonsDisabled(false);
+      }
+
+      // Drives the "closes in Ns" banner from `closesAt` rather than
+      // counting down locally from a fixed 10 -- a reconnect (or a tab that
+      // was just slow to render) picks up the real remaining time instead
+      // of restarting its own clock at 10.
+      function startCountdown(pending) {
+        setButtonsDisabled(true);
+        const label = stepLabels[pending.closingStep] ?? pending.closingStep;
+
+        function tick() {
+          const secondsLeft = Math.max(0, Math.ceil((pending.closesAt - Date.now()) / 1000));
+          banner.hidden = false;
+          banner.textContent = `${label} closes in ${secondsLeft}s`;
+          if (secondsLeft <= 0 && countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+          }
+        }
+
+        if (countdownInterval) clearInterval(countdownInterval);
+        tick();
+        countdownInterval = setInterval(tick, 250);
+      }
 
       function applyCurrentStep(step) {
         ladder.dataset.currentStep = String(step);
@@ -86,6 +131,7 @@ const rungs = STEPS;
 
       for (const button of document.querySelectorAll(".rung-toggle")) {
         button.addEventListener("click", async () => {
+          if (button.disabled) return;
           const step = Number(button.dataset.step);
           if (step === Number(ladder.dataset.currentStep)) return;
           try {
@@ -94,9 +140,11 @@ const rungs = STEPS;
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ step }),
             });
-            if (!res.ok) throw new Error("step change failed");
-            const { currentStep } = await res.json();
-            applyCurrentStep(currentStep);
+            // 202 means the countdown started; the step-closing event this
+            // tab receives over its own SSE connection drives the banner.
+            // A 409 means another change is already closing -- nothing to
+            // do here beyond what that event already shows.
+            if (!res.ok && res.status !== 409) throw new Error("step change failed");
           } catch {
             // Left as-is; the rung the server still thinks is open stays visibly open.
           }
@@ -155,14 +203,24 @@ const rungs = STEPS;
       source.addEventListener("snapshot", (event) => {
         const data = JSON.parse(event.data);
         renderAll(data.currentStep, data.cards);
+        // A tab that connects (or reconnects) mid-countdown has to join it
+        // in progress, not wait for the next step-closing broadcast -- this
+        // is what makes a presenter's own page refresh mid-countdown safe.
+        if (data.pending) startCountdown(data.pending);
+        else clearCountdown();
       });
 
       source.addEventListener("card", (event) => {
         appendCard(JSON.parse(event.data));
       });
 
+      source.addEventListener("step-closing", (event) => {
+        startCountdown(JSON.parse(event.data));
+      });
+
       source.addEventListener("step", (event) => {
         const data = JSON.parse(event.data);
+        clearCountdown();
         applyCurrentStep(data.currentStep);
       });
     </script>
@@ -198,6 +256,22 @@ const rungs = STEPS;
         font-weight: 700;
         letter-spacing: 0.1em;
         font-variant-numeric: tabular-nums;
+      }
+
+      .countdown-banner {
+        margin: 0;
+        padding: 0.75rem clamp(1rem, 3vw, 3rem);
+        background: color-mix(in srgb, var(--danger) 20%, var(--surface));
+        color: var(--text);
+        font-size: clamp(1rem, 1.8vw, 1.5rem);
+        font-weight: 600;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .rung-toggle:disabled {
+        cursor: not-allowed;
+        opacity: 0.8;
       }
 
       .ladder {
