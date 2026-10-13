@@ -31,6 +31,7 @@ if (!room) {
       ) : (
         <main class="room" data-current-step={room.currentStep}>
           <p class="room-code">Room {room.code}</p>
+          <p id="countdown-banner" class="countdown-banner" role="status" hidden></p>
 
           <ol class="ladder">
             {STEPS.map(({ step, label }) => (
@@ -68,6 +69,43 @@ if (!room) {
     <script>
       const code = window.location.pathname.split("/").pop()!;
       const roomEl = document.querySelector<HTMLElement>(".room");
+      const banner = document.getElementById("countdown-banner")!;
+      const stepLabels: Record<number, string> = { 1: "Clarify", 2: "Strengths", 3: "Concerns", 4: "Suggestions" };
+
+      let countdownInterval: ReturnType<typeof setInterval> | null = null;
+
+      function clearCountdown() {
+        if (countdownInterval) {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+        }
+        banner.hidden = true;
+        banner.textContent = "";
+      }
+
+      // Driven by the server's closesAt, not a local 10-second timer, so a
+      // reconnect mid-countdown (dropped phone signal, tab backgrounded and
+      // resumed) shows the real time left rather than restarting its own
+      // clock. The form itself is untouched here -- it's still the open
+      // rung's form until the `step` event actually arrives, so writing and
+      // sending keep working right up to the last second.
+      function startCountdown(pending: { closingStep: number; closesAt: number }) {
+        const label = stepLabels[pending.closingStep] ?? pending.closingStep;
+
+        function tick() {
+          const secondsLeft = Math.max(0, Math.ceil((pending.closesAt - Date.now()) / 1000));
+          banner.hidden = false;
+          banner.textContent = `${label} closes in ${secondsLeft}s`;
+          if (secondsLeft <= 0 && countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+          }
+        }
+
+        if (countdownInterval) clearInterval(countdownInterval);
+        tick();
+        countdownInterval = setInterval(tick, 250);
+      }
 
       function setStatus(status: HTMLElement, text: string, isError: boolean) {
         status.textContent = text;
@@ -100,7 +138,15 @@ if (!room) {
               body: JSON.stringify({ step, body }),
             });
             if (res.status === 409) {
-              setStatus(status, "This rung is closed. Please write for the open rung.", true);
+              // The countdown ran out between this tab rendering the form
+              // and the submit landing -- the one case this project exists
+              // to prevent losing someone's words over. The textarea is
+              // deliberately left alone: nothing here clears it.
+              setStatus(
+                status,
+                "This rung just closed. Your draft is still here — you can copy it into the next rung.",
+                true,
+              );
             } else if (!res.ok) {
               setStatus(status, "Couldn't send. Please try again.", true);
             } else {
@@ -156,10 +202,17 @@ if (!room) {
             currentStep = data.currentStep;
             roomEl.dataset.currentStep = String(currentStep);
           }
+          if (data.pending) startCountdown(data.pending);
+          else clearCountdown();
+        });
+
+        source.addEventListener("step-closing", (event) => {
+          startCountdown(JSON.parse((event as MessageEvent).data));
         });
 
         source.addEventListener("step", (event) => {
           const data = JSON.parse((event as MessageEvent).data);
+          clearCountdown();
           if (data.currentStep !== currentStep) {
             closeForm(currentStep);
             openForm(data.currentStep);
@@ -190,6 +243,16 @@ if (!room) {
         color: var(--text-dim);
         font-variant-numeric: tabular-nums;
         letter-spacing: 0.08em;
+      }
+
+      .countdown-banner {
+        margin: 0.75rem 0 0;
+        padding: 0.6rem 0.75rem;
+        border-radius: 0.5rem;
+        background: color-mix(in srgb, var(--danger) 20%, var(--surface));
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        text-align: center;
       }
 
       .ladder {
