@@ -39,7 +39,10 @@ const rungs = STEPS;
       <span class="room-code">{room.code}</span>
     </header>
 
-    <p id="countdown-banner" class="countdown-banner" role="status" hidden></p>
+    <p id="countdown-banner" class="countdown-banner" hidden>
+      <span id="countdown-visual"></span>
+      <span id="countdown-announce" class="visually-hidden" role="status"></span>
+    </p>
 
     <main class="ladder" data-current-step={room.currentStep}>
       {
@@ -73,6 +76,8 @@ const rungs = STEPS;
     <script define:vars={{ code: room.code, initialStep: room.currentStep }}>
       const ladder = document.querySelector(".ladder");
       const banner = document.getElementById("countdown-banner");
+      const countdownVisual = document.getElementById("countdown-visual");
+      const countdownAnnounce = document.getElementById("countdown-announce");
       const stepLabels = { 1: "Clarify", 2: "Strengths", 3: "Concerns", 4: "Suggestions" };
 
       let countdownInterval = null;
@@ -89,22 +94,27 @@ const rungs = STEPS;
           countdownInterval = null;
         }
         banner.hidden = true;
-        banner.textContent = "";
+        countdownVisual.textContent = "";
+        countdownAnnounce.textContent = "";
         setButtonsDisabled(false);
       }
 
-      // Drives the "closes in Ns" banner from `closesAt` rather than
-      // counting down locally from a fixed 10 -- a reconnect (or a tab that
-      // was just slow to render) picks up the real remaining time instead
-      // of restarting its own clock at 10.
+      // Drives the "closes in Ns" text from remainingMs (the server's own
+      // countdown, re-measured fresh for this event) plus this device's own
+      // clock at the moment it arrived -- never a server-absolute
+      // deadline, which would need this device's clock to agree with the
+      // server's. A few hundred ms of drift is exactly what turned a 10s
+      // countdown into a displayed 11s before this.
       function startCountdown(pending) {
+        const alreadyRunning = countdownInterval !== null;
         setButtonsDisabled(true);
         const label = stepLabels[pending.closingStep] ?? pending.closingStep;
+        const deadline = Date.now() + pending.remainingMs;
 
         function tick() {
-          const secondsLeft = Math.max(0, Math.ceil((pending.closesAt - Date.now()) / 1000));
+          const secondsLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
           banner.hidden = false;
-          banner.textContent = `${label} closes in ${secondsLeft}s`;
+          countdownVisual.textContent = `${label} closes in ${secondsLeft}s`;
           if (secondsLeft <= 0 && countdownInterval) {
             clearInterval(countdownInterval);
             countdownInterval = null;
@@ -114,6 +124,12 @@ const rungs = STEPS;
         if (countdownInterval) clearInterval(countdownInterval);
         tick();
         countdownInterval = setInterval(tick, 250);
+        // Announced once, when the countdown actually starts (or this tab
+        // joins one already in progress) -- not on every 250ms tick, which
+        // would have a screen reader repeat the same sentence ten times a
+        // second. countdownAnnounce is a separate aria-live node from the
+        // visibly-ticking text for exactly this reason.
+        if (!alreadyRunning) countdownAnnounce.textContent = `${label} is closing.`;
       }
 
       function applyCurrentStep(step) {
