@@ -9,10 +9,9 @@ project as it stands. The brief and spec are on the
 ## ADR 1: Astro (server) + Drizzle ORM + SQLite on the Fly volume
 
 **Context.** `fly.toml` fixes a single small Fly machine and one volume at
-`/data` -- no second service, no managed database. The repo arrived with no
-app framework and no ORM: the final-project template explicitly leaves the
-stack open. The app needs server-rendered pages *and* API routes talking to
-one small database, all on one process.
+`/data` -- no second service, no managed database. The app needs
+server-rendered pages *and* API routes talking to one small database, all
+on one process.
 
 **Decision.** Astro with `output: "server"` and the `@astrojs/node` adapter
 in standalone mode, so pages and API routes live in one Node process with no
@@ -66,8 +65,10 @@ for `STEP_COUNTDOWN_MS` (10s in production), then commits and broadcasts
 rejected (409) rather than restarting the clock or racing two timers --
 one in-flight countdown per room. `src/lib/broadcast.ts` keeps this as an
 in-memory `pending` map, included in the `snapshot` every new or
-reconnecting connection gets, so a presenter's own refresh mid-countdown
-rejoins the same clock instead of losing it.
+reconnecting connection gets (as `remainingMs`, re-measured fresh for that
+connection rather than a shared absolute timestamp, so no client needs its
+clock to agree with the server's), so a presenter's own refresh
+mid-countdown rejoins the same clock instead of losing it.
 
 Weighed against C, D treats the *participant* as the one who needs the
 warning, not just a grace period after the fact: C still closes the rung
@@ -78,15 +79,28 @@ same mechanism. A and B were rejected for the reason above: the Ladder of
 Feedback needs to run in order, but not at the cost of silently discarding
 feedback mid-sentence.
 
-**Consequences.** Every switch now costs the room a fixed 10 seconds it
-didn't before -- roughly 30 seconds added across four rungs, paid once per
-transition. Someone can still miss the window (a slow typist, a moment's
-distraction), getting the same 409 a B-style keep would soften, with the
-same mitigation: the draft stays in the textarea, and the error message
-says so. The countdown state lives only in process memory, alongside the
-connection table: if the app restarts mid-countdown, the pending switch is
-lost and the presenter clicks the rung again -- acceptable because a
-mid-countdown restart is rare and the fix is one click, not data loss.
+A gap surfaced live, after this first shipped: the 409-keeps-your-draft
+behaviour only covered a rejected *submit*. Text never submitted at all --
+left in the textarea when the countdown simply ran out -- still vanished
+with the closing form, the same loss this ADR exists to prevent, reached
+by a path the four options above didn't separately name. The decision
+stands; what changed is the implementation catching this case too: on a
+committed `step`, unsent text in the closing rung is carried forward as a
+read-only draft on whichever rung opens next (a Copy-in button, never
+automatic -- it was written for the old rung -- plus Dismiss), and also
+written to `sessionStorage` so it survives a refresh or reconnect.
+
+**Consequences.** Every switch now costs the room a fixed 10 seconds --
+roughly 30 seconds added across four rungs, paid once per transition. The
+countdown state lives only in process memory: a restart or redeploy
+mid-countdown loses the pending switch entirely, and the presenter clicks
+the rung again -- acceptable since that's rare and the fix is one click,
+not data loss. The carried-forward draft is a client-side safety net on
+top of the server's own rule, not a replacement: `sessionStorage` access
+is wrapped in try/catch (a blocked or cleared store just means the net
+doesn't catch anything), and it only survives within the same tab -- it
+covers the common case without pretending to guarantee delivery the way
+the server-side push does.
 
 ## Realtime: SSE, not another round of polling
 
@@ -99,12 +113,12 @@ reload.
 **Decision.** Server-Sent Events over one `GET /api/rooms/[code]/events`
 endpoint. `src/lib/broadcast.ts` keeps an in-memory `Map<roomCode,
 Set<connection>>`; `cards.ts` and `step.ts` call `broadcast()` on every
-state change. Every connection -- a first load or an `EventSource`'s own
-automatic reconnect after a dropped phone network -- gets a `snapshot`
-event first, carrying the full current state, so a reconnect redraws from
-the server's truth rather than replaying whatever happened while offline.
-A periodic heartbeat comment keeps the connection from reading as idle to
-an intervening proxy.
+state change. Every connection -- first load or an `EventSource`
+reconnect after a dropped network -- gets a `snapshot` first, carrying
+full current state, so a reconnect redraws from the server's truth rather
+than replaying whatever happened while offline. A periodic heartbeat
+comment keeps the connection from reading as idle to an intervening
+proxy.
 ([`6feec45`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/6feec45),
 [`b67c53e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/b67c53e))
 
@@ -117,15 +131,31 @@ table. Verified against the live deployment, not just `pnpm check`: a card
 submitted from one device reached another's SSE connection within the
 push itself, with no buffering observed from Fly's edge.
 
+Two gaps found live. First: a brief network drop left the stage showing a
+stale rung after reconnecting. Not a broadcast problem -- the next
+connection's `snapshot` was always correct -- but a timing one:
+`EventSource` falls back to a browser-chosen reconnect delay unless the
+stream states its own via a `retry:` field, which this one didn't send.
+Added as `retry: 1000`.
+
+Second: the participant page's newly-opened form rendered unstyled (a
+plain white box, barely-visible button). Astro only bakes the scoping
+attribute that makes `<style>` apply onto markup present in the `.astro`
+file at build time, and that form was built at runtime from an
+`innerHTML` string, which never gets it. Fixed by moving the markup into
+a `<template>` element in the same file and cloning it -- Astro scopes
+everything inside a `<template>` same as any other markup, so a clone
+carries it forward.
+
 ## Deploying every step, not just at the end
 
 Every commit above was pushed and redeployed as it landed, the discipline
 Crit 8 started
 ([`61f274f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/61f274f)).
-This week that caught nothing production-specific the way HOST/TLS did in
-Crit 8 -- but confirming that *is* the point: a long-lived connection
-surviving a real reverse proxy is cheap to check early and expensive to
-discover at the cutoff.
+Both live-only bugs above (the reconnect delay, the unstyled form) surfaced
+exactly because of this: `pnpm check` runs against a container, not a
+phone on a real network reconnecting to a real deploy, so neither would
+have shown up any other way before the cutoff.
 
 ## What this slice deliberately leaves out
 
