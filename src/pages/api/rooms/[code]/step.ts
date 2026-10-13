@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 
+import { broadcast } from "../../../../lib/broadcast.ts";
 import { getRoomByCode, presenterCookieName, setCurrentStep } from "../../../../lib/rooms.ts";
 import { isStep } from "../../../../lib/steps.ts";
 
@@ -27,5 +28,6 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
   if (!isStep(step)) return json(400, { error: "step must be an integer 1-4" });
 
   await setCurrentStep(room.id, step);
+  broadcast(code, "step", { currentStep: step });
   return json(200, { currentStep: step });
 };
