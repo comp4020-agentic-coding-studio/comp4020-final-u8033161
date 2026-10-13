@@ -122,28 +122,49 @@ const rungs = STEPS;
         }
       }
 
-      // Polling for now (a few seconds is plenty for this week's scope) --
-      // Crit 9 replaces this with SSE so cards and rung changes push instead.
-      async function poll() {
-        try {
-          const res = await fetch(`/api/rooms/${code}`);
-          if (!res.ok) return;
-          const data = await res.json();
-          applyCurrentStep(data.currentStep);
-          const byStep = new Map();
-          for (const card of data.cards) {
-            if (!byStep.has(card.step)) byStep.set(card.step, []);
-            byStep.get(card.step).push(card);
-          }
-          for (let step = 1; step <= 4; step++) {
-            renderCards(step, byStep.get(step) ?? []);
-          }
-        } catch {
-          // offline for a tick; the next poll tries again
+      function renderAll(currentStep, cards) {
+        applyCurrentStep(currentStep);
+        const byStep = new Map();
+        for (const card of cards) {
+          if (!byStep.has(card.step)) byStep.set(card.step, []);
+          byStep.get(card.step).push(card);
+        }
+        for (let step = 1; step <= 4; step++) {
+          renderCards(step, byStep.get(step) ?? []);
         }
       }
 
-      setInterval(poll, 3000);
+      function appendCard(card) {
+        const list = document.querySelector(`.rung[data-step="${card.step}"] .cards`);
+        if (!list) return;
+        const empty = list.querySelector(".empty");
+        if (empty) empty.remove();
+        const item = document.createElement("li");
+        item.className = "card-chip";
+        item.textContent = card.body;
+        list.append(item);
+      }
+
+      // SSE: one persistent connection per tab instead of polling every few
+      // seconds. EventSource reconnects on its own after a dropped network;
+      // every connection (first load or reconnect) gets a `snapshot` event
+      // first, so a reconnecting tab redraws from the server's current
+      // truth rather than trying to replay whatever it missed.
+      const source = new EventSource(`/api/rooms/${code}/events`);
+
+      source.addEventListener("snapshot", (event) => {
+        const data = JSON.parse(event.data);
+        renderAll(data.currentStep, data.cards);
+      });
+
+      source.addEventListener("card", (event) => {
+        appendCard(JSON.parse(event.data));
+      });
+
+      source.addEventListener("step", (event) => {
+        const data = JSON.parse(event.data);
+        applyCurrentStep(data.currentStep);
+      });
     </script>
 
     <style>

@@ -140,25 +140,33 @@ if (!room) {
         wireForm(form);
       }
 
-      // Polling for now -- Crit 9 replaces this with SSE. A few seconds is
-      // plenty: the point this week is the open-step rule, not latency.
+      // SSE instead of polling. Reconnects (EventSource's own, after a
+      // dropped phone network) get a `snapshot` first, so the form for the
+      // currently-open rung is always rebuilt from the server's actual
+      // state rather than whatever this tab last knew.
       if (roomEl) {
         let currentStep = Number(roomEl.dataset.currentStep);
-        setInterval(async () => {
-          try {
-            const res = await fetch(`/api/rooms/${code}`);
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data.currentStep !== currentStep) {
-              closeForm(currentStep);
-              openForm(data.currentStep);
-              currentStep = data.currentStep;
-              roomEl.dataset.currentStep = String(currentStep);
-            }
-          } catch {
-            // offline for a tick; the next poll tries again
+        const source = new EventSource(`/api/rooms/${code}/events`);
+
+        source.addEventListener("snapshot", (event) => {
+          const data = JSON.parse((event as MessageEvent).data);
+          if (data.currentStep !== currentStep) {
+            closeForm(currentStep);
+            openForm(data.currentStep);
+            currentStep = data.currentStep;
+            roomEl.dataset.currentStep = String(currentStep);
           }
-        }, 3000);
+        });
+
+        source.addEventListener("step", (event) => {
+          const data = JSON.parse((event as MessageEvent).data);
+          if (data.currentStep !== currentStep) {
+            closeForm(currentStep);
+            openForm(data.currentStep);
+            currentStep = data.currentStep;
+            roomEl.dataset.currentStep = String(currentStep);
+          }
+        });
       }
     </script>
 
