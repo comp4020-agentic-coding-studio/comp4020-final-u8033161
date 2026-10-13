@@ -96,7 +96,7 @@ if (!room) {
               <p class="draft-title" />
               <p class="draft-text" />
               <div class="draft-actions">
-                {/* Text is filled in by JS (showDraftRecovery) once it
+                {/* Text is filled in by JS (renderOfferedDraft) once it
                    knows which rung the draft is being offered into. */}
                 <button type="button" class="draft-copy">
                   Copy into next rung
@@ -287,39 +287,73 @@ if (!room) {
       // ADR 2's promise is that nobody's words disappear, not just that a
       // rejected *submit* keeps its draft (the 409 case above) -- an unsent
       // draft that was never submitted at all, sitting in a rung that
-      // closes out from under it, is the same loss. When a rung switch
-      // commits, any leftover text in the closing rung's textarea becomes a
-      // read-only draft box on top of whichever form opens next, with a
-      // button to copy it in (never auto-sent -- it was written for the old
-      // rung, so only a person should decide whether and how it applies to
-      // the new one) and a button to dismiss it.
-      function showDraftRecovery(closingStep: number, text: string) {
-        const nextStep = Number(roomEl!.dataset.currentStep);
-        const slot = document.querySelector(`.rung[data-step="${nextStep}"] .draft-slot`);
+      // closes out from under it, is the same loss. At most one such draft
+      // is "offered" at a time: the most recently closed rung's leftover
+      // text, not yet copied in or dismissed. It isn't cleared from
+      // sessionStorage until it's resolved one way or another, which is
+      // what lets the next two rules work.
+      let offeredDraft: { forStep: number; text: string } | null = null;
+
+      function clearAllDraftSlots() {
+        document.querySelectorAll<HTMLElement>(".draft-slot").forEach((slot) => {
+          slot.innerHTML = "";
+        });
+      }
+
+      // Called every time the open rung changes, so the draft box (if any
+      // is still unresolved) always ends up in the *currently open* rung's
+      // slot and nowhere else -- never left behind in a rung that just
+      // locked. If the open rung turns out to be the very one the draft
+      // was written for (the presenter went back), there's nothing to show
+      // as a box: that rung's form prefills straight from sessionStorage
+      // (see wireForm's loadDraft call), so the text is simply back where
+      // it was, editable, with no extra step.
+      function renderOfferedDraft(currentStep: number) {
+        clearAllDraftSlots();
+        if (!offeredDraft) return;
+        if (offeredDraft.forStep === currentStep) {
+          offeredDraft = null;
+          return;
+        }
+
+        const slot = document.querySelector(`.rung[data-step="${currentStep}"] .draft-slot`);
         if (!slot || !draftTemplate) return;
-        slot.innerHTML = "";
         const box = draftTemplate.content.firstElementChild!.cloneNode(true) as HTMLElement;
-        const closingLabel = stepLabels[closingStep] ?? String(closingStep);
-        const nextLabel = stepLabels[nextStep] ?? String(nextStep);
-        box.querySelector(".draft-title")!.textContent = `Your unsent ${closingLabel} draft`;
+        const forStep = offeredDraft.forStep;
+        const text = offeredDraft.text;
+        box.querySelector(".draft-title")!.textContent = `Your unsent ${stepLabels[forStep] ?? forStep} draft`;
         box.querySelector(".draft-text")!.textContent = text;
         const copyButton = box.querySelector(".draft-copy") as HTMLButtonElement;
-        copyButton.textContent = `Copy into ${nextLabel}`;
+        copyButton.textContent = `Copy into ${stepLabels[currentStep] ?? currentStep}`;
         copyButton.addEventListener("click", () => {
-          const textarea = document.querySelector<HTMLTextAreaElement>(`.rung[data-step="${nextStep}"] textarea`);
+          const textarea = document.querySelector<HTMLTextAreaElement>(`.rung[data-step="${currentStep}"] textarea`);
           if (textarea) {
             textarea.value = text;
             textarea.dispatchEvent(new Event("input", { bubbles: true }));
             textarea.focus();
           }
-          clearDraft(closingStep);
-          slot.innerHTML = "";
+          clearDraft(forStep);
+          offeredDraft = null;
+          clearAllDraftSlots();
         });
         box.querySelector(".draft-dismiss")!.addEventListener("click", () => {
-          clearDraft(closingStep);
-          slot.innerHTML = "";
+          clearDraft(forStep);
+          offeredDraft = null;
+          clearAllDraftSlots();
         });
         slot.append(box);
+      }
+
+      // A step other than the one currently open that still has a saved
+      // draft -- found on a fresh connection (first load, or a reconnect
+      // that happened to arrive with no live step-change event of its own
+      // in between) so a draft left over from before a refresh is still
+      // offered rather than silently stranded in storage.
+      function findOrphanedDraftStep(excludeStep: number): number | null {
+        for (const step of [1, 2, 3, 4]) {
+          if (step !== excludeStep && loadDraft(step)) return step;
+        }
+        return null;
       }
 
       function handleStepChange(nextStep: number, closingStep: number) {
@@ -328,8 +362,8 @@ if (!room) {
         const leftover = closeForm(closingStep);
         openForm(nextStep);
         if (roomEl) roomEl.dataset.currentStep = String(nextStep);
-        if (leftover) showDraftRecovery(closingStep, leftover);
-        clearDraft(closingStep);
+        if (leftover) offeredDraft = { forStep: closingStep, text: leftover };
+        renderOfferedDraft(nextStep);
       }
 
       // SSE instead of polling. Reconnects (EventSource's own, after a
@@ -344,6 +378,17 @@ if (!room) {
           const currentStep = Number(roomEl.dataset.currentStep);
           if (data.currentStep !== currentStep) {
             handleStepChange(data.currentStep, currentStep);
+          } else if (!offeredDraft) {
+            // No step change happened on this connection (first load, or a
+            // reconnect that landed between step changes), but a draft
+            // from an earlier rung can still be sitting in sessionStorage
+            // from before a refresh -- offer it rather than leave it
+            // silently stranded in storage.
+            const orphanedStep = findOrphanedDraftStep(data.currentStep);
+            if (orphanedStep !== null) {
+              offeredDraft = { forStep: orphanedStep, text: loadDraft(orphanedStep)! };
+              renderOfferedDraft(data.currentStep);
+            }
           }
           if (data.pending) startCountdown(data.pending);
           else clearCountdown();
