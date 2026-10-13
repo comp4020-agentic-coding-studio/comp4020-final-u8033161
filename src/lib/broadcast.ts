@@ -29,6 +29,24 @@ export function setPendingStep(code: string, value: PendingStep | undefined): vo
   else pending.delete(code);
 }
 
+export interface PendingStepForClient {
+  closingStep: number;
+  nextStep: number;
+  remainingMs: number;
+}
+
+// What a client actually gets, over step-closing or inside a snapshot:
+// remainingMs computed fresh at send time, never the raw closesAt. A client
+// anchoring to its own Date.now() at the moment it receives this needs no
+// agreement with the server's clock -- closesAt would require exactly that
+// agreement, and a few hundred ms of clock drift is exactly the kind of
+// thing that turned a 10s countdown into an observed "11s".
+export function pendingStepForClient(code: string): PendingStepForClient | null {
+  const p = pending.get(code);
+  if (!p) return null;
+  return { closingStep: p.closingStep, nextStep: p.nextStep, remainingMs: Math.max(0, p.closesAt - Date.now()) };
+}
+
 const encoder = new TextEncoder();
 
 function frame(event: string, data: unknown): Uint8Array {

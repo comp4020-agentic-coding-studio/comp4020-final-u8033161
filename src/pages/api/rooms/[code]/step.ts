@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 
-import { broadcast, getPendingStep, setPendingStep } from "../../../../lib/broadcast.ts";
+import { broadcast, getPendingStep, pendingStepForClient, setPendingStep } from "../../../../lib/broadcast.ts";
 import { getRoomByCode, presenterCookieName, setCurrentStep } from "../../../../lib/rooms.ts";
 import { isStep } from "../../../../lib/steps.ts";
 
@@ -55,9 +55,12 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
   }
 
   const closesAt = Date.now() + COUNTDOWN_MS;
-  const pendingStep = { closingStep: room.currentStep, nextStep: step, closesAt };
-  setPendingStep(code, pendingStep);
-  broadcast(code, "step-closing", pendingStep);
+  setPendingStep(code, { closingStep: room.currentStep, nextStep: step, closesAt });
+  // Broadcast remainingMs, not the raw closesAt -- see broadcast.ts for why:
+  // every recipient anchors the countdown to its own clock at receipt time,
+  // so server/client clock drift can't turn a 10s countdown into an
+  // observed 11s (or 9s).
+  broadcast(code, "step-closing", pendingStepForClient(code));
 
   const timer = setTimeout(() => {
     timers.delete(code);
@@ -68,9 +71,9 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
   }, COUNTDOWN_MS);
   timers.set(code, timer);
 
-  // 202: scheduled, not yet in effect. The step-closing event above (which
-  // this same request's caller also receives over its own SSE connection)
-  // is what actually drives the UI; this response just confirms the server
+  // 202: scheduled, not yet in effect. The step-closing event (which this
+  // same request's caller also receives over its own SSE connection) is
+  // what actually drives the UI; this response just confirms the server
   // accepted the request.
-  return json(202, pendingStep);
+  return json(202, pendingStepForClient(code));
 };

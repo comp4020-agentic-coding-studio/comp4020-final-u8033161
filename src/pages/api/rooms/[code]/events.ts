@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 
-import { addConnection, getPendingStep, removeConnection, sendTo } from "../../../../lib/broadcast.ts";
+import { addConnection, pendingStepForClient, removeConnection, sendTo } from "../../../../lib/broadcast.ts";
 import { getRoomByCode, listCards } from "../../../../lib/rooms.ts";
 
 // SSE replaces the stage and room pages' polling. Every connection -- a
@@ -27,11 +27,23 @@ export const GET: APIRoute = async ({ params }) => {
       streamController = controller;
       addConnection(code, controller);
 
+      // The `retry:` field tells EventSource how long to wait before
+      // reconnecting after a dropped connection -- without it, some
+      // browsers fall back to a multi-second default. A stage left showing
+      // a stale rung after a brief network hiccup is this default retry
+      // delay, not a bug in what's broadcast: the very next connection
+      // gets a fresh snapshot with the room's actual state.
+      controller.enqueue(new TextEncoder().encode("retry: 1000\n\n"));
+
       const cards = await listCards(room.id);
       sendTo(controller, "snapshot", {
         currentStep: room.currentStep,
         cards: cards.map((c) => ({ id: c.id, step: c.step, body: c.body, createdAt: c.createdAt })),
-        pending: getPendingStep(code) ?? null,
+        // remainingMs computed fresh for this connection, same as
+        // step-closing -- a tab reconnecting partway through a countdown
+        // gets the real time left, not whatever closesAt said when the
+        // countdown started.
+        pending: pendingStepForClient(code),
       });
 
       // Fly's proxy (and some browsers) will close an idle connection; a
