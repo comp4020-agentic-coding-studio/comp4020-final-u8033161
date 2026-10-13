@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 
+import { broadcast } from "../../../../lib/broadcast.ts";
 import { addCard, getRoomByCode } from "../../../../lib/rooms.ts";
 import { isStep } from "../../../../lib/steps.ts";
 
@@ -34,5 +35,6 @@ export const POST: APIRoute = async ({ params, request }) => {
   }
 
   const card = await addCard(room.id, step, body);
+  broadcast(code, "card", { id: card.id, step: card.step, body: card.body, createdAt: card.createdAt });
   return json(201, { card });
 };
