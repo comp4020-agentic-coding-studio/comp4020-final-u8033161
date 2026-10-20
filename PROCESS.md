@@ -133,9 +133,42 @@ All four live-only bugs above surfaced because of this: `pnpm check` runs
 against a container, not a phone on a real network, so none would have
 shown up any other way before the cutoff.
 
+## ADR 3: a server-checked participant identity, separate from the presenter's
+
+**Title.** How the app tells two participants apart for Crit 10's
+multi-user requirement.
+
+**Status.** Accepted, Crit 10.
+
+**Context.** Crit 8 and 9 already identify the presenter (a token cookie,
+checked server-side before `/step`). Participants had no identity at all:
+every card submission was anonymous and indistinguishable from every
+other's, which satisfies neither "the app tells them apart" nor "logs who
+did what."
+
+**Decision.** Mint a participant identity on first visit to a room, the
+same token-cookie shape as the presenter's, but with a second, public value
+(`publicId`) that's safe to log and to show next to a card -- the token
+itself never is. A required name prompt on `/room/<code>` collects a
+display name, sanitized server-side (control characters and newlines
+stripped, length-capped) before it's stored or logged. `POST
+/api/rooms/<code>/cards` resolves the author only from the request's own
+cookie, never from anything the request body claims, so one participant's
+cookie can never be used to submit a card as another. See
+`docs/access-control.md` for the full rule and what's checked where.
+
+**Consequences.** Two participants may pick the same display name, so every
+log line and every piece of attribution keys on `publicId`, not the name.
+Cards submitted before this change have no `participantId`; `listCards()`
+resolves each card's author from its `participantId` where one exists and
+the stage renders a null one as "anonymous" rather than erroring or hiding
+the card.
+
 ## What this slice deliberately leaves out
 
 No participant presence, no fly-in card animation, and no
 sealed-envelope/consent flow for Concerns cards -- out of scope for Crit
 9, per the staged plan in `README.md`. The cross-week growth-timeline
-status (will-do/won't-do/done) is Crit 10's.
+status (will-do/won't-do/done) was considered for Crit 10 and dropped in
+favour of the multi-user and logging requirements the brief actually asks
+for this week.

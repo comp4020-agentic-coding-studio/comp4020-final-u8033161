@@ -50,6 +50,11 @@ e.g. let someone queue a card for a not-yet-open rung instead of blocking it
 outright -- once there's been a real crit's worth of feedback on whether the
 hard block feels right or just frustrating.
 
+Crit 10 adds a second rule: a card is always attributed to the participant
+who is actually logged in via their own cookie, never to a name or id a
+request claims. See `docs/access-control.md` for who is identified how, what
+each role may see and change, and why.
+
 ## This week (Crit 8) vs. what's coming
 
 Built now: room creation and joining by code, the four-rung ladder as a real
