@@ -65,7 +65,7 @@ const rungs = STEPS;
                 {stepCards.map((card) => (
                   <li class="card-chip">
                     <span class="card-author">{card.participantName ?? "anonymous"}</span>
-                    {card.body}
+                    <span class="card-body">{card.body}</span>
                   </li>
                 ))}
                 {stepCards.length === 0 && <li class="empty">No cards yet</li>}
@@ -76,8 +76,27 @@ const rungs = STEPS;
       }
     </main>
 
+    {/*
+      Same reasoning as the room page's card-form and draft templates: Astro
+      only bakes its CSS-scoping attribute (data-astro-cid-*) onto markup
+      present in this file at build time. A card chip built at runtime via
+      document.createElement never gets it, which is why .card-author's
+      "own line, bold, dimmed" styling silently didn't apply to any card
+      rendered after page load (every card, in practice, since even the
+      first paint comes from the snapshot event below) -- the name just ran
+      into the body text with no visual separation. Cloning this template
+      instead carries the scoping attribute with it.
+    */}
+    <template id="card-chip-template">
+      <li class="card-chip">
+        <span class="card-author"></span>
+        <span class="card-body"></span>
+      </li>
+    </template>
+
     <script define:vars={{ code: room.code, initialStep: room.currentStep }}>
       const ladder = document.querySelector(".ladder");
+      const cardChipTemplate = document.getElementById("card-chip-template");
       const banner = document.getElementById("countdown-banner");
       const countdownVisual = document.getElementById("countdown-visual");
       const countdownAnnounce = document.getElementById("countdown-announce");
@@ -187,12 +206,9 @@ const rungs = STEPS;
       }
 
       function renderCardChip(card) {
-        const item = document.createElement("li");
-        item.className = "card-chip";
-        const author = document.createElement("span");
-        author.className = "card-author";
-        author.textContent = card.participantName ?? "anonymous";
-        item.append(author, document.createTextNode(card.body));
+        const item = cardChipTemplate.content.firstElementChild.cloneNode(true);
+        item.querySelector(".card-author").textContent = card.participantName ?? "anonymous";
+        item.querySelector(".card-body").textContent = card.body;
         return item;
       }
 
@@ -392,6 +408,11 @@ const rungs = STEPS;
         font-weight: 600;
         color: var(--text-dim);
         margin-bottom: 0.2rem;
+      }
+
+      .card-body {
+        display: block;
+        overflow-wrap: anywhere;
       }
 
       .empty {
