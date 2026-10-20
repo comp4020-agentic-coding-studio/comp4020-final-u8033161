@@ -1,3 +1,4 @@
+import { JSDOM } from "jsdom";
 import { expect, inject, it } from "vitest";
 
 // HTTP-only against the running app, same as invariants.test.ts.
@@ -26,6 +27,18 @@ async function createRoom(): Promise<string> {
   const { code } = (await res.json()) as { code: string };
   expect(code).toMatch(/^\d{6}$/);
   return code;
+}
+
+// Same as createRoom, but also hands back the presenter cookie -- needed by
+// anything that has to load the stage page itself (GET /stage/<code>),
+// which redirects anyone without it.
+async function createRoomWithPresenterCookie(): Promise<{ code: string; presenterCookie: string }> {
+  const res = await post("/api/rooms", {});
+  expect(res.status).toBe(201);
+  const { code } = (await res.json()) as { code: string };
+  const setCookie = res.headers.get("set-cookie");
+  expect(setCookie, "createRoom's response carried no Set-Cookie header").toBeTruthy();
+  return { code, presenterCookie: setCookie!.split(";")[0] };
 }
 
 // Joins a room as a fresh participant, returning the Cookie header value for
@@ -112,4 +125,42 @@ it("attributes a card to the submitting participant's own cookie, never to an id
   const { cards } = (await state.json()) as { cards: { body: string; participantName: string | null }[] };
   const posted = cards.find((c) => c.body === text);
   expect(posted?.participantName).toBe("[example] Alice");
+});
+
+// Regression test for the author-glued-to-body rendering: a card used to
+// render as "Alicedo you have a question" with no separator at all, because
+// the author span and the card text were siblings with no element wrapping
+// the body -- indistinguishable once CSS failed to apply (see
+// src/pages/stage/[code].astro's card-chip-template comment). This checks
+// the structure the stage serves, not just the text content, so a future
+// regression back to a bare text node next to .card-author would fail here
+// even if the two still happened to read unambiguously.
+it("renders a card's author and text as separate elements on the stage", async () => {
+  const { code, presenterCookie } = await createRoomWithPresenterCookie();
+  const participantCookie = await joinParticipant(code, "[example] Alice");
+  const text = "[example] do you have any questions";
+
+  const submit = await post(`/api/rooms/${code}/cards`, { step: 1, body: text }, participantCookie);
+  expect(submit.status).toBe(201);
+
+  const stage = await fetch(new URL(`/stage/${code}`, baseUrl), { headers: { cookie: presenterCookie } });
+  expect(stage.status).toBe(200);
+  const dom = new JSDOM(await stage.text());
+
+  const chip = [...dom.window.document.querySelectorAll(".card-chip")].find((el) =>
+    el.querySelector(".card-body")?.textContent?.includes(text),
+  );
+  expect(chip, "no .card-chip rendered the submitted card's text").toBeTruthy();
+
+  const author = chip!.querySelector(".card-author");
+  const cardBody = chip!.querySelector(".card-body");
+  expect(author, ".card-chip has no .card-author element").toBeTruthy();
+  expect(cardBody, ".card-chip has no .card-body element").toBeTruthy();
+  expect(author!.textContent?.trim()).toBe("[example] Alice");
+  expect(cardBody!.textContent?.trim()).toBe(text);
+
+  // The two must be separate elements, not one text node the author's name
+  // was concatenated into -- this is what actually failed before the fix.
+  expect(author).not.toBe(cardBody);
+  expect(chip!.children).toHaveLength(2);
 });
