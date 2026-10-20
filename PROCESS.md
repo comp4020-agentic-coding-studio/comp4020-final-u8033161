@@ -140,29 +140,40 @@ multi-user requirement.
 
 **Status.** Accepted, Crit 10.
 
-**Context.** Crit 8 and 9 already identify the presenter (a token cookie,
-checked server-side before `/step`). Participants had no identity at all:
-every card submission was anonymous and indistinguishable from every
-other's, which satisfies neither "the app tells them apart" nor "logs who
-did what."
+**Context.** The presenter already has an identity (a token cookie, checked
+before `/step`). Participants had none: every card was anonymous, which
+satisfies neither "tells them apart" nor "logs who did what."
 
-**Decision.** Mint a participant identity on first visit to a room, the
-same token-cookie shape as the presenter's, but with a second, public value
-(`publicId`) that's safe to log and to show next to a card -- the token
-itself never is. A required name prompt on `/room/<code>` collects a
-display name, sanitized server-side (control characters and newlines
-stripped, length-capped) before it's stored or logged. `POST
-/api/rooms/<code>/cards` resolves the author only from the request's own
-cookie, never from anything the request body claims, so one participant's
-cookie can never be used to submit a card as another. See
-`docs/access-control.md` for the full rule and what's checked where.
+**Decision.** Mint a participant identity on first visit to a room: a
+secret token cookie plus a public `publicId`, safe to log and show, that a
+required, sanitized name prompt attaches a display name to. Card submission
+resolves the author only from the request's own cookie, never from
+anything the body claims, so one participant's cookie can't submit a card
+as another. See `docs/access-control.md`. Schema in
+[`9b9e466`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/9b9e466),
+the mechanism in
+[`944e1f0`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/944e1f0),
+its tests in
+[`deefba4`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/deefba4),
+the write-up in
+[`2a36d32`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/2a36d32).
 
-**Consequences.** Two participants may pick the same display name, so every
-log line and every piece of attribution keys on `publicId`, not the name.
-Cards submitted before this change have no `participantId`; `listCards()`
-resolves each card's author from its `participantId` where one exists and
-the stage renders a null one as "anonymous" rather than erroring or hiding
-the card.
+**Consequences.** Two participants may share a display name, so logging and
+attribution key on `publicId`, never the name. A card from before this
+change has no `participantId`; the stage renders that as "anonymous".
+
+Tested live myself: two windows, as "Alice" and "Bob", showed Alice twice. I
+described exactly what I saw rather than guessing at a fix, and asked for
+the evidence to be checked. A genuinely different browser showed two
+separate people -- the "Alice" windows had shared one cookie (incognito
+windows in the same Chrome share a session), not an identity bug. The same
+test caught something real: a card's author name ran straight into its
+text with no separator ("Alicedo you have any question"), the same missing-
+CSS-scoping cause as ADR 2's draft box. Fixed the same way, a cloned
+`<template>`
+([`4c663b4`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/4c663b4),
+[`ba9633f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-u8033161/commit/ba9633f)),
+checked again on the live page.
 
 ## What this slice deliberately leaves out
 
