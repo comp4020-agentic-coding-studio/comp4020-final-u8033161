@@ -1,5 +1,6 @@
 ---
 import "../../styles/global.css";
+import { getParticipantByToken, participantCookieName } from "../../lib/participants.ts";
 import { getRoomByCode } from "../../lib/rooms.ts";
 import { STEPS } from "../../lib/steps.ts";
 
@@ -9,6 +10,13 @@ const room = code ? await getRoomByCode(code) : undefined;
 if (!room) {
   Astro.response.status = 404;
 }
+
+// Anyone without a valid participant cookie for this room sees the name
+// prompt instead of the ladder -- a required step, not an optional profile,
+// since there's otherwise no identity for the server to attribute a card to
+// or to log. See docs/access-control.md.
+const participantToken = room ? Astro.cookies.get(participantCookieName(room.code))?.value : undefined;
+const participant = room && participantToken ? await getParticipantByToken(room.id, participantToken) : undefined;
 ---
 
 <!doctype html>
@@ -27,6 +35,18 @@ if (!room) {
           <p>
             <a href="/">Back home</a>
           </p>
+        </main>
+      ) : !participant ? (
+        <main class="join">
+          <p class="room-code">Room {room.code}</p>
+          <h1>What should we call you?</h1>
+          <p>Your name appears on the cards you submit.</p>
+          <form id="join-form" novalidate>
+            <label for="name">Your name</label>
+            <input id="name" name="name" maxlength="30" autocomplete="off" required aria-describedby="join-error" />
+            <button type="submit">Join</button>
+          </form>
+          <p id="join-error" class="error" role="alert" hidden></p>
         </main>
       ) : (
         <main class="room" data-current-step={room.currentStep}>
@@ -113,6 +133,38 @@ if (!room) {
 
     <script>
       const code = window.location.pathname.split("/").pop()!;
+
+      // The join form only exists when the server rendered this request
+      // without a valid participant cookie -- see the Astro frontmatter
+      // above. A successful join reloads the page so everything below (the
+      // SSE connection, the ladder) renders from the server with the new
+      // cookie already attached, rather than trying to splice the ladder in
+      // client-side.
+      const joinForm = document.querySelector<HTMLFormElement>("#join-form");
+      if (joinForm) {
+        const joinError = document.querySelector<HTMLParagraphElement>("#join-error")!;
+        const nameInput = document.querySelector<HTMLInputElement>("#name")!;
+        joinForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          joinError.hidden = true;
+          const submitButton = joinForm.querySelector("button")!;
+          submitButton.disabled = true;
+          try {
+            const res = await fetch(`/api/rooms/${code}/join`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ name: nameInput.value }),
+            });
+            if (!res.ok) throw new Error("join failed");
+            window.location.reload();
+          } catch {
+            joinError.hidden = false;
+            joinError.textContent = "Couldn't join. Try again.";
+            submitButton.disabled = false;
+          }
+        });
+      }
+
       const roomEl = document.querySelector<HTMLElement>(".room");
       const banner = document.getElementById("countdown-banner")!;
       const countdownVisual = document.getElementById("countdown-visual")!;
@@ -415,6 +467,54 @@ if (!room) {
         max-width: 24rem;
         margin: 4rem auto;
         text-align: center;
+      }
+
+      .join {
+        max-width: 24rem;
+        margin: 3rem auto;
+      }
+
+      .join form {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+      }
+
+      .join label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--text-dim);
+        margin-bottom: 0.3rem;
+      }
+
+      .join input {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 0.6rem 0.75rem;
+        flex: 1;
+        min-width: 10rem;
+      }
+
+      .join button {
+        background: var(--accent);
+        color: var(--accent-contrast);
+        border: none;
+        border-radius: 0.5rem;
+        padding: 0.65rem 1.1rem;
+        font-weight: 600;
+      }
+
+      .join button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      .join .error {
+        color: var(--danger);
+        margin-bottom: 0;
       }
 
       .room {

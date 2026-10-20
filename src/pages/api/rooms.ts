@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 
+import { formatActor, logAction } from "../../lib/log.ts";
 import { createRoom, presenterCookieName } from "../../lib/rooms.ts";
 
 export const POST: APIRoute = async ({ cookies, url }) => {
@@ -15,6 +16,8 @@ export const POST: APIRoute = async ({ cookies, url }) => {
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
+
+  logAction({ room: code, actor: formatActor("presenter"), action: "room.create", result: "allowed" });
 
   return new Response(JSON.stringify({ code }), {
     status: 201,

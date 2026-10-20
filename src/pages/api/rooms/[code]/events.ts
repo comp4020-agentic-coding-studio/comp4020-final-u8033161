@@ -38,7 +38,13 @@ export const GET: APIRoute = async ({ params }) => {
       const cards = await listCards(room.id);
       sendTo(controller, "snapshot", {
         currentStep: room.currentStep,
-        cards: cards.map((c) => ({ id: c.id, step: c.step, body: c.body, createdAt: c.createdAt })),
+        cards: cards.map((c) => ({
+          id: c.id,
+          step: c.step,
+          body: c.body,
+          createdAt: c.createdAt,
+          participantName: c.participantName,
+        })),
         // remainingMs computed fresh for this connection, same as
         // step-closing -- a tab reconnecting partway through a countdown
         // gets the real time left, not whatever closesAt said when the

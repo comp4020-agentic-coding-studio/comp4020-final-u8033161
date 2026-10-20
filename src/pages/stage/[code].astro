@@ -63,7 +63,10 @@ const rungs = STEPS;
               </div>
               <ul class="cards" aria-live={step === room.currentStep ? "polite" : "off"}>
                 {stepCards.map((card) => (
-                  <li class="card-chip">{card.body}</li>
+                  <li class="card-chip">
+                    <span class="card-author">{card.participantName ?? "anonymous"}</span>
+                    {card.body}
+                  </li>
                 ))}
                 {stepCards.length === 0 && <li class="empty">No cards yet</li>}
               </ul>
@@ -179,11 +182,18 @@ const rungs = STEPS;
           return;
         }
         for (const card of cards) {
-          const item = document.createElement("li");
-          item.className = "card-chip";
-          item.textContent = card.body;
-          list.append(item);
+          list.append(renderCardChip(card));
         }
+      }
+
+      function renderCardChip(card) {
+        const item = document.createElement("li");
+        item.className = "card-chip";
+        const author = document.createElement("span");
+        author.className = "card-author";
+        author.textContent = card.participantName ?? "anonymous";
+        item.append(author, document.createTextNode(card.body));
+        return item;
       }
 
       function renderAll(currentStep, cards) {
@@ -203,10 +213,7 @@ const rungs = STEPS;
         if (!list) return;
         const empty = list.querySelector(".empty");
         if (empty) empty.remove();
-        const item = document.createElement("li");
-        item.className = "card-chip";
-        item.textContent = card.body;
-        list.append(item);
+        list.append(renderCardChip(card));
       }
 
       // SSE: one persistent connection per tab instead of polling every few
@@ -377,6 +384,14 @@ const rungs = STEPS;
         padding: 0.5rem 0.75rem;
         font-size: clamp(0.95rem, 1.3vw, 1.2rem);
         max-width: 28rem;
+      }
+
+      .card-author {
+        display: block;
+        font-size: 0.75em;
+        font-weight: 600;
+        color: var(--text-dim);
+        margin-bottom: 0.2rem;
       }
 
       .empty {

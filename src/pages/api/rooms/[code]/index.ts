@@ -23,6 +23,12 @@ export const GET: APIRoute = async ({ params }) => {
   return json(200, {
     code: room.code,
     currentStep: room.currentStep,
-    cards: cards.map((c) => ({ id: c.id, step: c.step, body: c.body, createdAt: c.createdAt })),
+    cards: cards.map((c) => ({
+      id: c.id,
+      step: c.step,
+      body: c.body,
+      createdAt: c.createdAt,
+      participantName: c.participantName,
+    })),
   });
 };

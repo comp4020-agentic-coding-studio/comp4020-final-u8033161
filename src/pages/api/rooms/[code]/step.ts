@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 
 import { broadcast, getPendingStep, pendingStepForClient, setPendingStep } from "../../../../lib/broadcast.ts";
+import { formatActor, logAction } from "../../../../lib/log.ts";
 import { getRoomByCode, presenterCookieName, setCurrentStep } from "../../../../lib/rooms.ts";
 import { isStep } from "../../../../lib/steps.ts";
 
@@ -32,9 +33,17 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
 
   const presented = cookies.get(presenterCookieName(code))?.value;
   if (!presented || presented !== room.presenterToken) {
+    logAction({
+      room: code,
+      actor: formatActor("presenter"),
+      action: "step.change",
+      result: "denied",
+      reason: presented ? "invalid-presenter-cookie" : "no-presenter-cookie",
+    });
     return json(403, { error: "not this room's presenter" });
   }
 
+  const actor = formatActor("presenter");
   const body = await request.json().catch(() => null);
   const step = body?.step;
   if (!isStep(step)) return json(400, { error: "step must be an integer 1-4" });
@@ -46,6 +55,14 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
   // for this same reason; this is the server-side backstop for a click
   // that slips through anyway (e.g. a second, stale tab).
   if (getPendingStep(code)) {
+    logAction({
+      room: code,
+      actor,
+      action: "step.change",
+      target: `step=${step}`,
+      result: "denied",
+      reason: "already-closing",
+    });
     return json(409, { error: "a rung change is already closing; wait for it to finish" });
   }
 
@@ -56,6 +73,13 @@ export const POST: APIRoute = async ({ params, request, cookies }) => {
 
   const closesAt = Date.now() + COUNTDOWN_MS;
   setPendingStep(code, { closingStep: room.currentStep, nextStep: step, closesAt });
+  logAction({
+    room: code,
+    actor,
+    action: "step.change",
+    target: `from=${room.currentStep},to=${step}`,
+    result: "allowed",
+  });
   // Broadcast remainingMs, not the raw closesAt -- see broadcast.ts for why:
   // every recipient anchors the countdown to its own clock at receipt time,
   // so server/client clock drift can't turn a 10s countdown into an
