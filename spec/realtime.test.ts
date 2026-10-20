@@ -29,6 +29,17 @@ async function createRoom(): Promise<{ code: string; presenterCookie: string }> 
   return { code, presenterCookie };
 }
 
+// Card submission is participant-only (see crit-room.test.ts for the access
+// rule itself), so every test here that submits a card joins first, the same
+// way a real participant's browser would.
+async function joinParticipant(code: string, name = "[example] participant"): Promise<string> {
+  const res = await post(`/api/rooms/${code}/join`, { name });
+  expect(res.status).toBe(201);
+  const setCookie = res.headers.get("set-cookie");
+  expect(setCookie, "join's response carried no Set-Cookie header").toBeTruthy();
+  return setCookie!.split(";")[0];
+}
+
 interface SseEvent {
   event: string;
   data: unknown;
@@ -86,6 +97,7 @@ async function collectSseEvents(
 
 it("delivers a submitted card to another open connection within a second", async () => {
   const { code } = await createRoom();
+  const participantCookie = await joinParticipant(code);
   const text = "[example] pushed over SSE";
 
   const eventsPromise = collectSseEvents(
@@ -98,7 +110,7 @@ it("delivers a submitted card to another open connection within a second", async
   // so the race is "does the push arrive in time", not "did the listener
   // start in time".
   await new Promise((resolve) => setTimeout(resolve, 100));
-  const submit = await post(`/api/rooms/${code}/cards`, { step: 1, body: text });
+  const submit = await post(`/api/rooms/${code}/cards`, { step: 1, body: text }, participantCookie);
   expect(submit.status).toBe(201);
 
   const events = await eventsPromise;
@@ -111,6 +123,7 @@ it(
   "accepts a card on the closing rung during the countdown, then rejects it once the switch commits",
   async () => {
     const { code, presenterCookie } = await createRoom();
+    const participantCookie = await joinParticipant(code);
 
     // Room starts on rung 1; ask to move to rung 2. This schedules the
     // switch instead of committing it -- rung 1 is still "open" by the
@@ -119,18 +132,20 @@ it(
     expect(schedule.status).toBe(202);
     const { remainingMs } = (await schedule.json()) as { remainingMs: number };
 
-    const duringCountdown = await post(`/api/rooms/${code}/cards`, {
-      step: 1,
-      body: "[example] written while rung 1 was closing",
-    });
+    const duringCountdown = await post(
+      `/api/rooms/${code}/cards`,
+      { step: 1, body: "[example] written while rung 1 was closing" },
+      participantCookie,
+    );
     expect(duringCountdown.status).toBe(201);
 
     await new Promise((resolve) => setTimeout(resolve, remainingMs + 250)); // a small margin past the server's own deadline
 
-    const afterCountdown = await post(`/api/rooms/${code}/cards`, {
-      step: 1,
-      body: "[example] written after rung 1 had actually closed",
-    });
+    const afterCountdown = await post(
+      `/api/rooms/${code}/cards`,
+      { step: 1, body: "[example] written after rung 1 had actually closed" },
+      participantCookie,
+    );
     expect(afterCountdown.status).toBe(409);
 
     const state = await fetch(new URL(`/api/rooms/${code}`, baseUrl));
@@ -180,8 +195,9 @@ it(
 
 it("sends a snapshot with existing state as soon as a connection opens", async () => {
   const { code } = await createRoom();
+  const participantCookie = await joinParticipant(code);
   const text = "[example] already on the board before this connection";
-  const submit = await post(`/api/rooms/${code}/cards`, { step: 1, body: text });
+  const submit = await post(`/api/rooms/${code}/cards`, { step: 1, body: text }, participantCookie);
   expect(submit.status).toBe(201);
 
   const events = await collectSseEvents(
